@@ -194,19 +194,34 @@ document.addEventListener('DOMContentLoaded', function() {
         if (challengeDetails) {
             challengeDetails.classList.remove('hidden');
             challengeDetails.innerHTML = `
-                <h2>Challenge Started</h2>
-                <p>Your challenge is running on port: ${data.port}</p>
-                <div class="terminal">
-                    <p>Connect to the challenge at: <a href="http://localhost:${data.port}" target="_blank">http://localhost:${data.port}</a></p>
-                    <p>Good luck!</p>
+                <div id="challenge-content" class="challenge-content">
+                    <h2>Challenge Started</h2>
+                    <p>Your challenge is running on port: ${data.port}</p>
+                    <div class="terminal">
+                        <p>Connect to the challenge at: <a href="http://localhost:${data.port}" target="_blank">http://localhost:${data.port}</a></p>
+                        <p>Good luck!</p>
+                    </div>
+                    <div id="timeout-info" class="timeout-info">
+                        <p>This challenge will automatically expire in <span id="countdown">10:00</span></p>
+                        <div class="progress-bar">
+                            <div id="time-remaining" style="width: 100%;"></div>
+                        </div>
+                    </div>
+                    <div class="flag-submission">
+                        <h3>Submit Flag</h3>
+                        <input type="text" id="flag-input" placeholder="Enter flag here">
+                        <button id="submit-flag">Submit</button>
+                    </div>
+                    <div class="challenge-controls">
+                        <button id="stop-challenge" data-container="${data.containerId}">Stop Challenge</button>
+                    </div>
                 </div>
-                <div class="flag-submission">
-                    <h3>Submit Flag</h3>
-                    <input type="text" id="flag-input" placeholder="Enter flag here">
-                    <button id="submit-flag">Submit</button>
-                </div>
-                <div class="challenge-controls">
-                    <button id="stop-challenge" data-container="${data.containerId}">Stop Challenge</button>
+
+                <div id="challenge-expired" class="challenge-expired-message">
+                    <h3>Challenge Expired</h3>
+                    <p>Your challenge session has ended. The container has been automatically stopped.</p>
+                    <p>If you'd like to try again, you can start a new challenge session.</p>
+                    <button class="btn-restart" id="restart-challenge" data-challenge="${challengeId}">Start New Session</button>
                 </div>
             `;
 
@@ -214,6 +229,13 @@ document.addEventListener('DOMContentLoaded', function() {
             const submitBtn = document.getElementById('submit-flag');
             const flagInput = document.getElementById('flag-input');
             const stopBtn = document.getElementById('stop-challenge');
+            const countdownEl = document.getElementById('countdown');
+            const progressBar = document.getElementById('time-remaining');
+
+            // Start the countdown timer
+            if (countdownEl && progressBar && data.timeout && data.startTime) {
+                startCountdownTimer(countdownEl, progressBar, data.timeout, new Date(data.startTime));
+            }
 
             if (submitBtn && flagInput) {
                 submitBtn.addEventListener('click', function() {
@@ -232,7 +254,187 @@ document.addEventListener('DOMContentLoaded', function() {
                     stopChallenge(containerId);
                 });
             }
+
+            // Add event listener for the restart button
+            const restartBtn = document.getElementById('restart-challenge');
+            if (restartBtn) {
+                restartBtn.addEventListener('click', function() {
+                    const challengeId = this.getAttribute('data-challenge');
+                    if (challengeId) {
+                        // Hide the expired message
+                        const challengeExpired = document.getElementById('challenge-expired');
+                        if (challengeExpired) {
+                            challengeExpired.style.display = 'none';
+                        }
+
+                        // Start a new challenge session
+                        startChallenge(challengeId);
+                    }
+                });
+            }
         }
+    }
+
+    function startCountdownTimer(countdownEl, progressBar, timeout, startTime) {
+        let containerId = null;
+        let statusCheckInterval = null;
+        let localTimerInterval = null;
+        let lastRemainingSeconds = timeout;
+
+        // Find the container ID from the stop button
+        const stopBtn = document.getElementById('stop-challenge');
+        if (stopBtn) {
+            containerId = stopBtn.getAttribute('data-container');
+        }
+
+        // Function to update the UI based on remaining time
+        const updateUI = (remainingSeconds) => {
+            // Update countdown text
+            const minutes = Math.floor(remainingSeconds / 60);
+            const seconds = remainingSeconds % 60;
+            countdownEl.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+
+            // Update progress bar
+            const percentRemaining = (remainingSeconds / timeout) * 100;
+            progressBar.style.width = `${percentRemaining}%`;
+
+            // Change color as time runs out
+            if (percentRemaining < 25) {
+                progressBar.style.backgroundColor = '#d9534f'; // Red
+            } else if (percentRemaining < 50) {
+                progressBar.style.backgroundColor = '#f0ad4e'; // Yellow
+            }
+
+            // If time is up, show the expired message
+            if (remainingSeconds <= 0 && lastRemainingSeconds > 0) {
+                countdownEl.textContent = 'Expired';
+                progressBar.style.width = '0%';
+
+                // Show the expired message with animation
+                const timeoutInfo = document.getElementById('timeout-info');
+                const challengeContent = document.getElementById('challenge-content');
+                const challengeExpired = document.getElementById('challenge-expired');
+
+                if (timeoutInfo) {
+                    timeoutInfo.classList.add('expired');
+                }
+
+                if (challengeContent && challengeExpired) {
+                    // Add fading effect to the challenge content
+                    challengeContent.classList.add('fading');
+
+                    // Show the expired message
+                    setTimeout(() => {
+                        challengeExpired.style.display = 'block';
+                    }, 500);
+                }
+            }
+
+            lastRemainingSeconds = remainingSeconds;
+        };
+
+        // Function to check container status from the server
+        const checkContainerStatus = async () => {
+            if (!containerId) return;
+
+            try {
+                const response = await fetch(`/challenge/${containerId}/status`);
+
+                if (response.ok) {
+                    const data = await response.json();
+
+                    // Update UI with server-provided remaining time
+                    updateUI(Math.max(0, data.remaining));
+
+                    // If container is no longer running, stop checking
+                    if (data.status === 'stopped' || data.status === 'expired' || data.status === 'not_found') {
+                        console.log(`Container ${containerId} is ${data.status}, stopping status checks`);
+                        clearInterval(statusCheckInterval);
+                        clearInterval(localTimerInterval);
+
+                        // If the container was stopped but the UI is still showing, update it
+                        if (data.status === 'stopped' || data.status === 'not_found' || data.status === 'expired') {
+                            countdownEl.textContent = data.status === 'expired' ? 'Expired' : 'Stopped';
+                            progressBar.style.width = '0%';
+
+                            // Show the expired/stopped message
+                            const timeoutInfo = document.getElementById('timeout-info');
+                            const challengeContent = document.getElementById('challenge-content');
+                            const challengeExpired = document.getElementById('challenge-expired');
+
+                            if (timeoutInfo) {
+                                timeoutInfo.classList.add('expired');
+                            }
+
+                            if (challengeContent && challengeExpired) {
+                                // Add fading effect to the challenge content
+                                challengeContent.classList.add('fading');
+
+                                // Show the expired message
+                                setTimeout(() => {
+                                    challengeExpired.style.display = 'block';
+                                }, 500);
+                            }
+                        }
+                    }
+                } else {
+                    // If we get a 404, the container is gone
+                    if (response.status === 404) {
+                        console.log(`Container ${containerId} not found, stopping status checks`);
+                        clearInterval(statusCheckInterval);
+                        clearInterval(localTimerInterval);
+                        countdownEl.textContent = 'Stopped';
+                        progressBar.style.width = '0%';
+
+                        // Show the expired/stopped message
+                        const timeoutInfo = document.getElementById('timeout-info');
+                        const challengeContent = document.getElementById('challenge-content');
+                        const challengeExpired = document.getElementById('challenge-expired');
+
+                        if (timeoutInfo) {
+                            timeoutInfo.classList.add('expired');
+                        }
+
+                        if (challengeContent && challengeExpired) {
+                            // Add fading effect to the challenge content
+                            challengeContent.classList.add('fading');
+
+                            // Show the expired message
+                            setTimeout(() => {
+                                challengeExpired.style.display = 'block';
+                            }, 500);
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('Error checking container status:', error);
+            }
+        };
+
+        // Function for local time updates between server checks
+        const updateLocalTimer = () => {
+            // Only update locally if we have a valid last remaining time
+            if (lastRemainingSeconds > 0) {
+                lastRemainingSeconds = Math.max(0, lastRemainingSeconds - 1);
+                updateUI(lastRemainingSeconds);
+            }
+        };
+
+        // Start both timers
+        // 1. Check with server every 5 seconds
+        statusCheckInterval = setInterval(checkContainerStatus, 5000);
+
+        // 2. Update locally every second for smoother countdown
+        localTimerInterval = setInterval(updateLocalTimer, 1000);
+
+        // Initial check
+        checkContainerStatus();
+
+        // Return a function to clean up both intervals
+        return () => {
+            clearInterval(statusCheckInterval);
+            clearInterval(localTimerInterval);
+        };
     }
 
     async function stopChallenge(containerId) {
@@ -248,8 +450,36 @@ document.addEventListener('DOMContentLoaded', function() {
             const data = await response.json();
 
             if (response.ok) {
+                // Update UI elements
+                const countdownEl = document.getElementById('countdown');
+                const progressBar = document.getElementById('time-remaining');
+                const timeoutInfo = document.getElementById('timeout-info');
+                const challengeContent = document.getElementById('challenge-content');
+                const challengeExpired = document.getElementById('challenge-expired');
+
+                if (countdownEl) {
+                    countdownEl.textContent = 'Stopped';
+                }
+
+                if (progressBar) {
+                    progressBar.style.width = '0%';
+                }
+
+                if (timeoutInfo) {
+                    timeoutInfo.classList.add('expired');
+                }
+
+                if (challengeContent && challengeExpired) {
+                    // Add fading effect to the challenge content
+                    challengeContent.classList.add('fading');
+
+                    // Show the expired message
+                    setTimeout(() => {
+                        challengeExpired.style.display = 'block';
+                    }, 500);
+                }
+
                 alert(`Challenge stopped successfully`);
-                challengeDetails.classList.add('hidden');
             } else {
                 alert('Failed to stop challenge: ' + (data.error || 'Unknown error'));
             }

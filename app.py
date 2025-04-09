@@ -4,6 +4,8 @@ import os
 import subprocess
 import threading
 import secrets
+import time
+from datetime import datetime, timedelta
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
@@ -13,6 +15,9 @@ app.config['SECRET_KEY'] = secrets.token_hex(32)
 users = {}
 challenges = {}
 active_containers = {}
+
+# Challenge timeout in seconds (1 minute for testing)
+CHALLENGE_TIMEOUT = 60
 
 CHALLENGE_BASE = "./challenges"
 DOCKER_TEMPLATE = """
@@ -170,7 +175,9 @@ class ChallengeLoader:
             active_containers[container_id] = {
                 "port": port,
                 "challenge": self.challenge_id,
-                "user": user_id  # Store which user started this container
+                "user": user_id,  # Store which user started this container
+                "start_time": datetime.now(),  # Store when the container was started
+                "image_tag": f"ctf_{self.challenge_id}_{user_id}"
             }
             return port, container_id
         except subprocess.CalledProcessError as e:
@@ -237,12 +244,59 @@ def start_challenge(challenge_id):
         "message": "Challenge started",
         "port": port,
         "containerId": container_id,
-        "flag": flag  # Remove this in production!
+        "flag": flag,  # Remove this in production!
+        "timeout": CHALLENGE_TIMEOUT,
+        "startTime": datetime.now().isoformat()
     })
 
 @app.route("/containers", methods=["GET"])
 def list_containers():
     return jsonify(active_containers)
+
+@app.route("/challenge/<container_id>/status", methods=["GET"])
+def check_container_status(container_id):
+    # Check if container exists in our records
+    if container_id not in active_containers:
+        return jsonify({"status": "not_found", "message": "Container not found"}), 404
+
+    container_info = active_containers[container_id]
+    start_time = container_info.get('start_time')
+
+    if not start_time:
+        return jsonify({"status": "unknown", "message": "Container start time unknown"}), 400
+
+    # Calculate remaining time
+    now = datetime.now()
+    elapsed_seconds = (now - start_time).total_seconds()
+    remaining_seconds = max(0, CHALLENGE_TIMEOUT - elapsed_seconds)
+
+    # Check if container is still running in Docker
+    try:
+        result = subprocess.run(["docker", "inspect", "-f", "{{.State.Running}}", container_id],
+                              capture_output=True, text=True)
+
+        if result.returncode != 0 or "true" not in result.stdout.lower():
+            # Container is not running
+            return jsonify({
+                "status": "stopped",
+                "message": "Container is not running",
+                "elapsed": elapsed_seconds,
+                "remaining": 0
+            })
+    except Exception as e:
+        print(f"Error checking container status: {e}")
+        # Continue with time calculation even if Docker check fails
+
+    # Return status with timing information
+    return jsonify({
+        "status": "running" if remaining_seconds > 0 else "expired",
+        "elapsed": elapsed_seconds,
+        "remaining": remaining_seconds,
+        "timeout": CHALLENGE_TIMEOUT,
+        "user": container_info.get('user'),
+        "challenge": container_info.get('challenge'),
+        "port": container_info.get('port')
+    })
 
 @app.route("/challenge/<container_id>/stop", methods=["POST"])
 def stop_challenge(container_id):
@@ -293,7 +347,48 @@ def get_challenges():
     # Return a list of available challenges
     return jsonify(list(challenges.keys()))
 
-def cleanup_containers():
+def cleanup_expired_containers():
+    """Clean up containers that have exceeded their timeout"""
+    now = datetime.now()
+    expired_containers = []
+
+    # Find expired containers
+    for container_id, info in list(active_containers.items()):
+        start_time = info.get('start_time')
+        if start_time:
+            elapsed_seconds = (now - start_time).total_seconds()
+            print(f"Container {container_id} for user {info.get('user')} has been running for {elapsed_seconds:.1f} seconds (timeout: {CHALLENGE_TIMEOUT}s)")
+
+            if elapsed_seconds > CHALLENGE_TIMEOUT:
+                expired_containers.append((container_id, info))
+
+    # Clean up expired containers
+    for container_id, info in expired_containers:
+        try:
+            print(f"Container {container_id} has expired (timeout: {CHALLENGE_TIMEOUT}s), stopping and removing...")
+            subprocess.run(["docker", "stop", container_id],
+                          capture_output=True, check=False)
+            subprocess.run(["docker", "rm", container_id],
+                          capture_output=True, check=False)
+
+            # Also remove the Docker image to free up space
+            image_tag = info.get('image_tag')
+            if image_tag:
+                try:
+                    subprocess.run(["docker", "rmi", image_tag],
+                                  capture_output=True, check=False)
+                    print(f"Removed Docker image {image_tag}")
+                except Exception as e:
+                    print(f"Error removing Docker image {image_tag}: {e}")
+
+            # Remove from active_containers but preserve user session data
+            active_containers.pop(container_id, None)
+
+            print(f"Successfully cleaned up expired container {container_id} for user {info.get('user')}")
+        except Exception as e:
+            print(f"Error cleaning up expired container {container_id}: {e}")
+
+def cleanup_stale_containers():
     """Clean up any stale containers from previous runs"""
     try:
         # Get all containers with our CTF prefix
@@ -318,9 +413,35 @@ def cleanup_containers():
     except Exception as e:
         print(f"Error during container cleanup: {e}")
 
+def start_cleanup_thread():
+    """Start a background thread to periodically check for expired containers"""
+    def cleanup_thread():
+        # Sleep first to allow the application to start up
+        time.sleep(5)
+
+        while True:
+            try:
+                print("Running periodic cleanup of expired containers...")
+                cleanup_expired_containers()
+
+                # Check more frequently as the timeout gets shorter
+                check_interval = min(15, max(5, CHALLENGE_TIMEOUT // 10))
+                print(f"Next cleanup check in {check_interval} seconds")
+                time.sleep(check_interval)
+            except Exception as e:
+                print(f"Error in cleanup thread: {e}")
+                # Don't crash the thread on error
+                time.sleep(10)
+
+    # Start the cleanup thread as a daemon so it doesn't block application shutdown
+    thread = threading.Thread(target=cleanup_thread, daemon=True)
+    thread.start()
+    print(f"Started background cleanup thread (checking every ~{min(15, max(5, CHALLENGE_TIMEOUT // 10))} seconds)")
+    return thread
+
 if __name__ == "__main__":
-    # Clean up any stale containers
-    cleanup_containers()
+    # Clean up any stale containers from previous runs
+    cleanup_stale_containers()
 
     # Preprocess challenges
     for challenge in os.listdir(CHALLENGE_BASE):
@@ -330,4 +451,9 @@ if __name__ == "__main__":
         }
         os.makedirs(os.path.join(CHALLENGE_BASE, challenge), exist_ok=True)
 
+    # Start the cleanup thread
+    cleanup_thread = start_cleanup_thread()
+
+    # Start the Flask application
+    print(f"Challenge timeout set to {CHALLENGE_TIMEOUT} seconds ({CHALLENGE_TIMEOUT/60} minutes)")
     app.run(host="0.0.0.0", port=5001)
