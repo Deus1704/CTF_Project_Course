@@ -1,19 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
 <head>
-    <title>{{ title }}</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CTF Platform</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='main.css') }}">
-
+</head>
 <body>
-    <div class="App">
-        <header class="App-header">
-            <img src="{{ url_for('static', filename='Octocat.png') }}" class="App-logo" alt="logo" />
-            <p>
-                GitHub Codespaces <span class="heart">♥️</span> Flask
-            </p>
-            <p class="small">
-                Edit <code>templates/index.html</code> and refresh to see your changes!
-            </p>
-        </header>
-    </div>
-</body>
+    <header>
+        <h1>CTF Challenge Platform</h1>
+    </header>
 
+    <div class="container">
+        <!-- Authentication Section -->
+        <section id="auth-section" class="auth-container">
+            <h2>Login or Register</h2>
+            <form id="login-form">
+                <div>
+                    <label for="username">Username:</label>
+                    <input type="text" id="username" name="username" required>
+                </div>
+                <div>
+                    <label for="password">Password:</label>
+                    <input type="password" id="password" name="password" required>
+                </div>
+                <button type="submit">Login / Register</button>
+            </form>
+        </section>
+
+        <!-- Challenge Section (hidden until logged in) -->
+        <section id="challenge-section" class="challenge-container hidden">
+            <div class="user-info">
+                <h2 id="welcome-message"></h2>
+                <button id="logout-btn">Logout</button>
+            </div>
+
+            <h2>Available Challenges</h2>
+            <div id="challenge-list">
+                <!-- Challenge cards will be inserted here by JavaScript -->
+            </div>
+
+            <div id="challenge-details" class="hidden">
+                <!-- Challenge details will be inserted here by JavaScript -->
+            </div>
+        </section>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
 </html>
