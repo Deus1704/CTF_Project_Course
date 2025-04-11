@@ -1,0 +1,2 @@
+flask==2.0.1
+# Additional tools will be installed in the Dockerfile

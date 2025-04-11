@@ -166,6 +166,21 @@ document.addEventListener('DOMContentLoaded', function() {
 
     async function startChallenge(challengeId) {
         try {
+            console.log(`Starting challenge ${challengeId}`);
+            // Show the modal immediately with a loading message
+            const modal = document.getElementById('challenge-modal');
+            const challengeDetails = document.getElementById('challenge-details');
+
+            if (challengeDetails && modal) {
+                modal.style.display = 'block';
+                challengeDetails.innerHTML = `
+                    <div class="challenge-content">
+                        <h2>Starting Challenge...</h2>
+                        <p>Please wait while we set up your challenge environment.</p>
+                    </div>
+                `;
+            }
+
             const response = await fetch(`/challenge/${challengeId}/start`, {
                 method: 'POST',
                 headers: {
@@ -178,21 +193,36 @@ document.addEventListener('DOMContentLoaded', function() {
             });
 
             const data = await response.json();
+            console.log('Challenge start response:', data);
 
             if (response.ok) {
                 showChallengeDetails(challengeId, data);
             } else {
                 alert('Failed to start challenge: ' + (data.error || 'Unknown error'));
+                // Close the modal if there was an error
+                if (modal) {
+                    modal.style.display = 'none';
+                }
             }
         } catch (error) {
             console.error('Challenge start error:', error);
             alert('Failed to start challenge. Please try again.');
+            // Close the modal if there was an error
+            const modal = document.getElementById('challenge-modal');
+            if (modal) {
+                modal.style.display = 'none';
+            }
         }
     }
 
     function showChallengeDetails(challengeId, data) {
-        if (challengeDetails) {
-            challengeDetails.classList.remove('hidden');
+        const modal = document.getElementById('challenge-modal');
+        const challengeDetails = document.getElementById('challenge-details');
+
+        if (challengeDetails && modal) {
+            // Show the modal immediately
+            modal.style.display = 'block';
+
             challengeDetails.innerHTML = `
                 <div id="challenge-content" class="challenge-content">
                     <h2>Challenge Started</h2>
@@ -221,9 +251,33 @@ document.addEventListener('DOMContentLoaded', function() {
                     <h3>Challenge Expired</h3>
                     <p>Your challenge session has ended. The container has been automatically stopped.</p>
                     <p>If you'd like to try again, you can start a new challenge session.</p>
-                    <button class="btn-restart" id="restart-challenge" data-challenge="${challengeId}">Start New Session</button>
+                    <div class="challenge-expired-actions">
+                        <button class="btn-restart" id="restart-challenge" data-challenge="${challengeId}">Start New Session</button>
+                        <button class="btn-close" id="close-expired-challenge">Close</button>
+                    </div>
                 </div>
             `;
+
+            // Close button functionality
+            const closeBtn = document.querySelector('.modal-close');
+            if (closeBtn) {
+                closeBtn.addEventListener('click', function() {
+                    modal.style.display = 'none';
+                    // Stop any running timers
+                    if (window.statusCheckInterval) clearInterval(window.statusCheckInterval);
+                    if (window.localTimerInterval) clearInterval(window.localTimerInterval);
+                });
+            }
+
+            // Close when clicking outside the modal
+            window.addEventListener('click', function(event) {
+                if (event.target === modal) {
+                    modal.style.display = 'none';
+                    // Stop any running timers
+                    if (window.statusCheckInterval) clearInterval(window.statusCheckInterval);
+                    if (window.localTimerInterval) clearInterval(window.localTimerInterval);
+                }
+            });
 
             // For demo purposes, we'll just check if the flag matches
             const submitBtn = document.getElementById('submit-flag');
@@ -270,6 +324,17 @@ document.addEventListener('DOMContentLoaded', function() {
                         // Start a new challenge session
                         startChallenge(challengeId);
                     }
+                });
+            }
+
+            // Add event listener for the close button in expired message
+            const closeExpiredBtn = document.getElementById('close-expired-challenge');
+            if (closeExpiredBtn) {
+                closeExpiredBtn.addEventListener('click', function() {
+                    modal.style.display = 'none';
+                    // Stop any running timers
+                    if (window.statusCheckInterval) clearInterval(window.statusCheckInterval);
+                    if (window.localTimerInterval) clearInterval(window.localTimerInterval);
                 });
             }
         }
@@ -323,10 +388,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     // Add fading effect to the challenge content
                     challengeContent.classList.add('fading');
 
-                    // Show the expired message
-                    setTimeout(() => {
-                        challengeExpired.style.display = 'block';
-                    }, 500);
+                    // Show the expired message immediately
+                    challengeExpired.style.display = 'block';
                 }
             }
 
@@ -370,10 +433,8 @@ document.addEventListener('DOMContentLoaded', function() {
                                 // Add fading effect to the challenge content
                                 challengeContent.classList.add('fading');
 
-                                // Show the expired message
-                                setTimeout(() => {
-                                    challengeExpired.style.display = 'block';
-                                }, 500);
+                                // Show the expired message immediately
+                                challengeExpired.style.display = 'block';
                             }
                         }
                     }
@@ -399,10 +460,8 @@ document.addEventListener('DOMContentLoaded', function() {
                             // Add fading effect to the challenge content
                             challengeContent.classList.add('fading');
 
-                            // Show the expired message
-                            setTimeout(() => {
-                                challengeExpired.style.display = 'block';
-                            }, 500);
+                            // Show the expired message immediately
+                            challengeExpired.style.display = 'block';
                         }
                     }
                 }
@@ -423,9 +482,11 @@ document.addEventListener('DOMContentLoaded', function() {
         // Start both timers
         // 1. Check with server every 5 seconds
         statusCheckInterval = setInterval(checkContainerStatus, 5000);
+        window.statusCheckInterval = statusCheckInterval;
 
         // 2. Update locally every second for smoother countdown
         localTimerInterval = setInterval(updateLocalTimer, 1000);
+        window.localTimerInterval = localTimerInterval;
 
         // Initial check
         checkContainerStatus();
@@ -434,6 +495,8 @@ document.addEventListener('DOMContentLoaded', function() {
         return () => {
             clearInterval(statusCheckInterval);
             clearInterval(localTimerInterval);
+            window.statusCheckInterval = null;
+            window.localTimerInterval = null;
         };
     }
 
@@ -473,10 +536,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     // Add fading effect to the challenge content
                     challengeContent.classList.add('fading');
 
-                    // Show the expired message
-                    setTimeout(() => {
-                        challengeExpired.style.display = 'block';
-                    }, 500);
+                    // Show the expired message immediately
+                    challengeExpired.style.display = 'block';
                 }
 
                 alert(`Challenge stopped successfully`);

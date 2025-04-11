@@ -40,11 +40,17 @@
             <div id="challenge-list">
                 <!-- Challenge cards will be inserted here by JavaScript -->
             </div>
-
-            <div id="challenge-details" class="hidden">
-                <!-- Challenge details will be inserted here by JavaScript -->
-            </div>
         </section>
+
+        <!-- Challenge Modal Dialog -->
+        <div id="challenge-modal" class="modal">
+            <div class="modal-content">
+                <span class="modal-close">&times;</span>
+                <div id="challenge-details">
+                    <!-- Challenge details will be inserted here by JavaScript -->
+                </div>
+            </div>
+        </div>
     </div>
 
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
