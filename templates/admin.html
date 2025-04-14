@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header class="admin-header">
+            <h1>CTF Platform Admin Panel</h1>
+            <div class="admin-controls">
+                <span id="admin-username"></span>
+                <button id="admin-logout-btn">Logout</button>
+            </div>
+        </header>
+
+        <!-- Admin Login Section -->
+        <section id="admin-login-section" class="admin-login-container">
+            <h2>Admin Login</h2>
+            <form id="admin-login-form">
+                <div class="form-group">
+                    <label for="username">Username</label>
+                    <input type="text" id="admin-username-input" name="username" required>
+                </div>
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="admin-password-input" name="password" required>
+                </div>
+                <button type="submit">Login</button>
+            </form>
+        </section>
+
+        <!-- Admin Dashboard Section -->
+        <section id="admin-dashboard" class="admin-dashboard hidden">
+            <div class="admin-tabs">
+                <button class="tab-button active" data-tab="users-tab">Users</button>
+                <button class="tab-button" data-tab="challenges-tab">Challenges</button>
+                <button class="tab-button" data-tab="submissions-tab">Submissions</button>
+                <button class="tab-button" data-tab="stats-tab">Statistics</button>
+            </div>
+
+            <div class="admin-tab-content">
+                <!-- Users Tab -->
+                <div id="users-tab" class="tab-pane active">
+                    <div class="tab-header">
+                        <h2>Users</h2>
+                        <div class="tab-actions">
+                            <input type="text" id="user-search" placeholder="Search users...">
+                            <button id="refresh-users" class="refresh-btn">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+                                </svg>
+                                Refresh
+                            </button>
+                        </div>
+                    </div>
+                    <div class="table-container">
+                        <table id="users-table" class="admin-table">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Username</th>
+                                    <th>Email</th>
+                                    <th>Points</th>
+                                    <th>Solved</th>
+                                    <th>Created</th>
+                                    <th>Last Login</th>
+                                    <th>Admin</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <!-- User rows will be inserted here by JavaScript -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Challenges Tab -->
+                <div id="challenges-tab" class="tab-pane">
+                    <div class="tab-header">
+                        <h2>Challenges</h2>
+                        <div class="tab-actions">
+                            <input type="text" id="challenge-search" placeholder="Search challenges...">
+                            <button id="refresh-challenges" class="refresh-btn">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+                                </svg>
+                                Refresh
+                            </button>
+                            <button id="add-challenge" class="add-btn">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <line x1="12" y1="5" x2="12" y2="19"></line>
+                                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                                </svg>
+                                Add Challenge
+                            </button>
+                        </div>
+                    </div>
+                    <div class="table-container">
+                        <table id="challenges-table" class="admin-table">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Name</th>
+                                    <th>Category</th>
+                                    <th>Difficulty</th>
+                                    <th>Points</th>
+                                    <th>Solves</th>
+                                    <th>Status</th>
+                                    <th>Created</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <!-- Challenge rows will be inserted here by JavaScript -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Submissions Tab -->
+                <div id="submissions-tab" class="tab-pane">
+                    <div class="tab-header">
+                        <h2>Recent Submissions</h2>
+                        <div class="tab-actions">
+                            <input type="text" id="submission-search" placeholder="Search submissions...">
+                            <button id="refresh-submissions" class="refresh-btn">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+                                </svg>
+                                Refresh
+                            </button>
+                        </div>
+                    </div>
+                    <div class="table-container">
+                        <table id="submissions-table" class="admin-table">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>User</th>
+                                    <th>Challenge</th>
+                                    <th>Status</th>
+                                    <th>Points</th>
+                                    <th>Submitted At</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <!-- Submission rows will be inserted here by JavaScript -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Statistics Tab -->
+                <div id="stats-tab" class="tab-pane">
+                    <div class="tab-header">
+                        <h2>Platform Statistics</h2>
+                        <div class="tab-actions">
+                            <button id="refresh-stats" class="refresh-btn">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+                                </svg>
+                                Refresh
+                            </button>
+                        </div>
+                    </div>
+                    <div class="stats-container">
+                        <div class="stats-cards">
+                            <div class="stats-card">
+                                <div class="stats-icon users-icon">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                                        <circle cx="9" cy="7" r="4"></circle>
+                                        <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                                        <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                                    </svg>
+                                </div>
+                                <div class="stats-info">
+                                    <h3>Total Users</h3>
+                                    <p id="total-users">0</p>
+                                </div>
+                            </div>
+                            <div class="stats-card">
+                                <div class="stats-icon challenges-icon">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                                    </svg>
+                                </div>
+                                <div class="stats-info">
+                                    <h3>Total Challenges</h3>
+                                    <p id="total-challenges">0</p>
+                                </div>
+                            </div>
+                            <div class="stats-card">
+                                <div class="stats-icon submissions-icon">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <polyline points="9 11 12 14 22 4"></polyline>
+                                        <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+                                    </svg>
+                                </div>
+                                <div class="stats-info">
+                                    <h3>Total Submissions</h3>
+                                    <p id="total-submissions">0</p>
+                                </div>
+                            </div>
+                            <div class="stats-card">
+                                <div class="stats-icon solves-icon">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                                        <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                                    </svg>
+                                </div>
+                                <div class="stats-info">
+                                    <h3>Total Solves</h3>
+                                    <p id="total-solves">0</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="stats-charts">
+                            <div class="stats-chart">
+                                <h3>Challenge Difficulty Distribution</h3>
+                                <div id="difficulty-chart" class="chart-container">
+                                    <div class="chart-bars">
+                                        <div class="chart-bar">
+                                            <div class="bar-fill easy-bar" style="height: 0%"></div>
+                                            <div class="bar-label">Easy</div>
+                                        </div>
+                                        <div class="chart-bar">
+                                            <div class="bar-fill medium-bar" style="height: 0%"></div>
+                                            <div class="bar-label">Medium</div>
+                                        </div>
+                                        <div class="chart-bar">
+                                            <div class="bar-fill hard-bar" style="height: 0%"></div>
+                                            <div class="bar-label">Hard</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="stats-chart">
+                                <h3>Category Distribution</h3>
+                                <div id="category-chart" class="chart-container">
+                                    <div class="chart-bars category-bars">
+                                        <!-- Category bars will be added dynamically -->
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- Add Challenge Modal -->
+    <div id="add-challenge-modal" class="modal">
+        <div class="modal-content">
+            <span class="modal-close">&times;</span>
+            <h2>Add New Challenge</h2>
+            <form id="add-challenge-form">
+                <div class="form-group">
+                    <label for="challenge-name">Name</label>
+                    <input type="text" id="challenge-name" name="name" required>
+                </div>
+                <div class="form-group">
+                    <label for="challenge-description">Description</label>
+                    <textarea id="challenge-description" name="description" required></textarea>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="challenge-category">Category</label>
+                        <select id="challenge-category" name="category" required>
+                            <option value="web">Web</option>
+                            <option value="crypto">Crypto</option>
+                            <option value="forensics">Forensics</option>
+                            <option value="reverse">Reverse Engineering</option>
+                            <option value="misc">Misc</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="challenge-difficulty">Difficulty</label>
+                        <select id="challenge-difficulty" name="difficulty" required>
+                            <option value="easy">Easy</option>
+                            <option value="medium">Medium</option>
+                            <option value="hard">Hard</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="challenge-points">Points</label>
+                        <input type="number" id="challenge-points" name="points" min="1" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="challenge-id">Challenge ID</label>
+                        <input type="text" id="challenge-id" name="challenge_id" required>
+                        <small>Used for Docker container name (e.g., web-basic)</small>
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn-primary">Add Challenge</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/admin.js') }}"></script>
+</body>
+</html>

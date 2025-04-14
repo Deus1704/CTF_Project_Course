@@ -1,5 +1,5 @@
 print("Starting application...")
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, redirect, url_for, flash, session
 import hashlib
 import os
 import subprocess
@@ -8,18 +8,34 @@ import secrets
 import time
 from datetime import datetime, timedelta
 from werkzeug.security import generate_password_hash, check_password_hash
+from models import db, User, Challenge, Submission, Hint, Achievement, Token
 print("Imports completed successfully")
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = secrets.token_hex(32)
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///ctf.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# In-memory storage for demo purposes (use DB in production)
-users = {}
-challenges = {}
+# Initialize the database
+db.init_app(app)
+
+# In-memory storage for container management
 active_containers = {}
 
 # Challenge timeout in seconds (5 minutes for better user experience)
 CHALLENGE_TIMEOUT = 300
+
+# Challenge base directory
+CHALLENGE_BASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "challenges")
+
+# Docker template for challenges
+DOCKER_TEMPLATE = """
+FROM python:3.9-slim
+WORKDIR /app
+RUN pip install flask
+COPY . .
+CMD ["python", "challenge.py"]
+"""
 
 
 def generate_flag(user_id, challenge_id):
@@ -182,17 +198,31 @@ class ChallengeLoader:
             # Pass the flag as an environment variable to the container
             print(f"[DEBUG] Running Docker container with command: docker run -d -p {port}:5000 -e CTF_FLAG={flag} {image_tag}")
 
-            # Add additional options to ensure container stability
+            # Get the host URL
+            host_url = request.host_url if hasattr(request, 'host_url') else f"http://localhost:5002"
+
+            # Run the container first
             container_id = subprocess.check_output([
                 "docker", "run",
                 "-d",  # Detached mode
                 "--restart", "unless-stopped",  # Restart policy
                 "-p", f"{port}:5000",  # Port mapping
                 "-e", f"CTF_FLAG={flag}",  # Flag environment variable
+                "-e", f"MAIN_SITE={host_url}",  # Main site URL for redirect
+                "-e", f"CHALLENGE_ID={self.challenge_id}",  # Challenge ID
                 "--memory", "256m",  # Memory limit
                 "--cpus", "0.5",  # CPU limit
                 image_tag
             ]).decode().strip()
+
+            # Now that we have the container ID, update it with the ID as an environment variable
+            try:
+                subprocess.run([
+                    "docker", "exec", container_id,
+                    "sh", "-c", f"echo 'export CONTAINER_ID={container_id}' >> /etc/environment"
+                ], check=True)
+            except Exception as e:
+                print(f"Warning: Failed to set CONTAINER_ID in container: {e}")
 
             print(f"Container started with ID: {container_id}")
 
@@ -249,32 +279,70 @@ class ChallengeLoader:
 @app.route("/login", methods=["POST"])
 def login():
     data = request.json
-    user_id = data.get("username")
+    username = data.get("username")
     password = data.get("password")
 
-    if user_id not in users:
-        users[user_id] = {
-            "password": generate_password_hash(password),
-            "tokens": set()
-        }
+    if not username or not password:
+        return jsonify({"error": "Username and password are required"}), 400
 
-    if not check_password_hash(users[user_id]["password"], password):
+    # Check if user exists
+    user = User.query.filter_by(username=username).first()
+
+    # If user doesn't exist, create a new one
+    if not user:
+        user = User(username=username)
+        user.set_password(password)
+        db.session.add(user)
+        db.session.commit()
+    elif not user.check_password(password):
         return jsonify({"error": "Invalid credentials"}), 401
 
-    token = secrets.token_urlsafe(32)
-    users[user_id]["tokens"].add(token)
-    return jsonify({"token": token})
+    # Update last login time
+    user.last_login = datetime.utcnow()
+    db.session.commit()
+
+    # Create a new token
+    token_value = secrets.token_urlsafe(32)
+    token = Token(user_id=user.id, token=token_value)
+    db.session.add(token)
+    db.session.commit()
+
+    # Create response with token in JSON
+    response = jsonify({"token": token_value, "user_id": user.id, "username": user.username, "points": user.points})
+
+    # Set a cookie with the token for use with redirects from challenge containers
+    response.set_cookie('ctf_token', token_value, httponly=True, max_age=86400)  # 24 hours
+
+    return response
+
+def verify_token(token_value):
+    """Verify if a token is valid and return the associated user"""
+    if not token_value:
+        return None
+
+    token = Token.query.filter_by(token=token_value, is_active=True).first()
+    if not token:
+        return None
+
+    # Check if token is expired
+    if token.expires_at and token.expires_at < datetime.now():
+        token.is_active = False
+        db.session.commit()
+        return None
+
+    return token.user
 
 @app.route("/challenge/<challenge_id>/start", methods=["POST"])
 def start_challenge(challenge_id):
     print(f"Starting challenge {challenge_id}")
-    user_id = request.json.get("user")
-    token = request.headers.get("Authorization")
-    print(f"User: {user_id}, Token: {token}")
+    token_value = request.headers.get("Authorization")
+    user = verify_token(token_value)
 
-    if token not in users.get(user_id, {}).get("tokens", set()):
-        print(f"Unauthorized: token {token} not in user tokens")
+    if not user:
+        print(f"Unauthorized: invalid or expired token")
         return jsonify({"error": "Unauthorized"}), 401
+
+    user_id = user.username  # Use username for backward compatibility with Docker
 
     # Check if user already has this challenge running
     for container_id, info in active_containers.items():
@@ -287,12 +355,44 @@ def start_challenge(challenge_id):
                     print(f"User {user_id} already has challenge {challenge_id} running on container {container_id}")
                     port = info.get('port')
                     flag = generate_flag(user_id, challenge_id)  # Regenerate the flag for consistency
-                    return jsonify({
-                        "message": "Challenge already running",
-                        "port": port,
-                        "containerId": container_id,
-                        "flag": flag
-                    })
+
+                    # Check if user has already solved this challenge
+                    challenge = Challenge.query.filter_by(challenge_id=challenge_id).first()
+                    if challenge:
+                        previous_correct = Submission.query.filter_by(
+                            user_id=user.id,
+                            challenge_id=challenge.id,
+                            is_correct=True
+                        ).first()
+
+                        # Get the main site URL for redirection
+                        main_site = request.host_url
+
+                        # Include solved status in response
+                        return jsonify({
+                            "message": "Challenge already running",
+                            "port": port,
+                            "containerId": container_id,
+                            "flag": flag,
+                            "already_solved": previous_correct is not None,
+                            "timeout": CHALLENGE_TIMEOUT,
+                            "startTime": info.get('start_time').isoformat() if info.get('start_time') else datetime.now().isoformat(),
+                            "main_site": main_site
+                        })
+                    else:
+                        # Get the main site URL for redirection
+                        main_site = request.host_url
+
+                        return jsonify({
+                            "message": "Challenge already running",
+                            "port": port,
+                            "containerId": container_id,
+                            "flag": flag,
+                            "already_solved": False,
+                            "timeout": CHALLENGE_TIMEOUT,
+                            "startTime": info.get('start_time').isoformat() if info.get('start_time') else datetime.now().isoformat(),
+                            "main_site": main_site
+                        })
             except Exception as e:
                 print(f"Error checking container status: {e}")
                 # Continue with starting a new container
@@ -308,13 +408,17 @@ def start_challenge(challenge_id):
     port, container_id = loader.run_container(user_id, flag)
     print(f"Container started on port {port} with ID {container_id}")
 
+    # Get the main site URL for redirection
+    main_site = request.host_url
+
     return jsonify({
         "message": "Challenge started",
         "port": port,
         "containerId": container_id,
         "flag": flag,  # Remove this in production!
         "timeout": CHALLENGE_TIMEOUT,
-        "startTime": datetime.now().isoformat()
+        "startTime": datetime.now().isoformat(),
+        "main_site": main_site
     })
 
 @app.route("/containers", methods=["GET"])
@@ -408,16 +512,784 @@ def stop_challenge(container_id):
 
 @app.route("/")
 def index():
-    return render_template('index.html', title="CTF Platform")
+    # Check if there's a flag success parameter
+    flag_success = request.args.get('flag_success') == 'true'
+    challenge_id = request.args.get('challenge')
+    container_id = request.args.get('container_id')
+    auto_show = request.args.get('auto_show') == 'true'
+
+    # Prepare context for template
+    context = {
+        'title': "CTF Platform",
+        'flag_success': flag_success,
+        'challenge_id': challenge_id,
+        'container_id': container_id,
+        'auto_show': auto_show,
+        'points_earned': 0,
+        'challenge_name': ''
+    }
+
+    # If flag was successfully submitted from a challenge container
+    if flag_success and challenge_id:
+        # Get the user from the session cookie if available
+        session_token = request.cookies.get('ctf_token')
+        if session_token:
+            user = verify_token(session_token)
+            if user:
+                # Get the challenge
+                challenge = Challenge.query.filter_by(challenge_id=challenge_id).first()
+                if challenge:
+                    context['challenge_name'] = challenge.name
+
+                    # Check if this is the first correct submission for this challenge
+                    previous_correct = Submission.query.filter_by(
+                        user_id=user.id,
+                        challenge_id=challenge.id,
+                        is_correct=True
+                    ).first()
+
+                    if not previous_correct:
+                        # Record the submission
+                        submission = Submission(
+                            user_id=user.id,
+                            challenge_id=challenge.id,
+                            flag=generate_flag(user.username, challenge_id),  # We don't have the actual flag, but we can regenerate it
+                            is_correct=True,
+                            points_awarded=challenge.points
+                        )
+                        db.session.add(submission)
+
+                        # Award points to the user
+                        user.points += challenge.points
+                        db.session.commit()
+
+                        # Add points to context
+                        context['points_earned'] = challenge.points
+
+                        # Set a flash message
+                        flash(f"Congratulations! You earned {challenge.points} points for solving {challenge.name}!", "success")
+                    else:
+                        # Even if already solved, we need to show the points that were earned
+                        previous_submission = Submission.query.filter_by(
+                            user_id=user.id,
+                            challenge_id=challenge.id,
+                            is_correct=True
+                        ).first()
+
+                        if previous_submission:
+                            context['points_earned'] = previous_submission.points_awarded
+                        else:
+                            context['points_earned'] = challenge.points
+
+                        flash("You've already solved this challenge!", "info")
+
+                    # Try to stop the container for this challenge
+                    try:
+                        # If container_id is provided in the URL, use it
+                        if container_id:
+                            # Stop and remove the container - use check_call for synchronous execution
+                            print(f"Stopping container {container_id} after successful flag submission")
+                            try:
+                                # Force stop and remove the container
+                                subprocess.check_call(["docker", "stop", container_id])
+                                subprocess.check_call(["docker", "rm", "-f", container_id])
+                                print(f"Container {container_id} has been stopped and removed")
+
+                                # Remove from active containers
+                                if container_id in active_containers:
+                                    active_containers.pop(container_id, None)
+                                    print(f"Removed container {container_id} from active containers")
+                            except subprocess.CalledProcessError as e:
+                                print(f"Error stopping container: {e}")
+                                # Try to find the container by name/ID pattern
+                                try:
+                                    # Get all containers for this challenge and user
+                                    result = subprocess.check_output(["docker", "ps", "-q", "--filter", f"name={challenge_id}-{user.username}"], text=True)
+                                    container_ids = result.strip().split('\n')
+                                    for c_id in container_ids:
+                                        if c_id:
+                                            print(f"Found container {c_id} for challenge {challenge_id}, stopping it")
+                                            subprocess.call(["docker", "stop", c_id])
+                                            subprocess.call(["docker", "rm", "-f", c_id])
+                                except Exception as inner_e:
+                                    print(f"Error finding containers by pattern: {inner_e}")
+                        else:
+                            # Find the container for this user and challenge
+                            found = False
+                            for c_id, info in list(active_containers.items()):
+                                if info.get('challenge') == challenge_id and info.get('user') == user.username:
+                                    container_id = c_id
+                                    context['container_id'] = container_id
+                                    found = True
+
+                                    # Stop and remove the container
+                                    print(f"Stopping container {container_id} after successful flag submission")
+                                    try:
+                                        subprocess.check_call(["docker", "stop", container_id])
+                                        subprocess.check_call(["docker", "rm", "-f", container_id])
+                                        print(f"Container {container_id} has been stopped and removed")
+                                    except subprocess.CalledProcessError as e:
+                                        print(f"Error stopping container: {e}")
+
+                                    # Remove from active containers
+                                    active_containers.pop(container_id, None)
+                                    print(f"Removed container {container_id} from active containers")
+                                    break
+
+                            # If not found in active_containers, try to find by pattern
+                            if not found:
+                                try:
+                                    # Get all containers for this challenge and user
+                                    result = subprocess.check_output(["docker", "ps", "-q", "--filter", f"name={challenge_id}-{user.username}"], text=True)
+                                    container_ids = result.strip().split('\n')
+                                    for c_id in container_ids:
+                                        if c_id:
+                                            print(f"Found container {c_id} for challenge {challenge_id}, stopping it")
+                                            subprocess.call(["docker", "stop", c_id])
+                                            subprocess.call(["docker", "rm", "-f", c_id])
+                                except Exception as inner_e:
+                                    print(f"Error finding containers by pattern: {inner_e}")
+                    except Exception as e:
+                        print(f"Error stopping container: {e}")
+
+                    # Set a flag to show the celebration effect
+                    context['show_celebration'] = True
+                    context['challenge_solved'] = True
+
+    return render_template('index.html', **context)
+
+@app.route("/admin")
+def admin_panel():
+    return render_template('admin.html', title="CTF Platform - Admin Panel")
+
+@app.route("/leaderboard")
+def leaderboard():
+    """Get the leaderboard of top users by points"""
+    # Get top 10 users by points
+    top_users = User.query.order_by(User.points.desc()).limit(10).all()
+
+    leaderboard_data = [{
+        'username': user.username,
+        'points': user.points,
+        'solved_challenges': Submission.query.filter_by(user_id=user.id, is_correct=True).count()
+    } for user in top_users]
+
+    return jsonify(leaderboard_data)
+
+@app.route("/user/profile")
+def user_profile():
+    """Get the profile of the current user"""
+    token_value = request.headers.get("Authorization")
+    user = verify_token(token_value)
+
+    if not user:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    # Get solved challenges
+    solved_submissions = Submission.query.filter_by(user_id=user.id, is_correct=True).all()
+    solved_challenge_ids = [sub.challenge_id for sub in solved_submissions]
+
+    # Get challenges the user has solved
+    solved_challenges = Challenge.query.filter(Challenge.id.in_(solved_challenge_ids)).all() if solved_challenge_ids else []
+
+    # Get user achievements
+    achievements = [{
+        'name': achievement.name,
+        'description': achievement.description,
+        'badge_image': achievement.badge_image,
+        'points': achievement.points
+    } for achievement in user.achievements]
+
+    # Get recent submissions
+    recent_submissions = Submission.query.filter_by(user_id=user.id).order_by(Submission.submitted_at.desc()).limit(5).all()
+
+    return jsonify({
+        'username': user.username,
+        'points': user.points,
+        'solved_challenges': [{
+            'id': challenge.challenge_id,
+            'name': challenge.name,
+            'category': challenge.category,
+            'difficulty': challenge.difficulty,
+            'points': challenge.points
+        } for challenge in solved_challenges],
+        'achievements': achievements,
+        'recent_submissions': [{
+            'challenge_name': Challenge.query.get(sub.challenge_id).name if Challenge.query.get(sub.challenge_id) else 'Unknown',
+            'is_correct': sub.is_correct,
+            'points_awarded': sub.points_awarded,
+            'submitted_at': sub.submitted_at.strftime('%Y-%m-%d %H:%M:%S')
+        } for sub in recent_submissions]
+    })
+
+@app.route("/admin/users")
+def admin_users():
+    """Get all users for admin panel"""
+    token_value = request.headers.get("Authorization")
+    user = verify_token(token_value)
+
+    if not user or not user.is_admin:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    users = User.query.all()
+
+    user_data = [{
+        'id': u.id,
+        'username': u.username,
+        'email': u.email,
+        'points': u.points,
+        'created_at': u.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+        'last_login': u.last_login.strftime('%Y-%m-%d %H:%M:%S') if u.last_login else None,
+        'is_admin': u.is_admin,
+        'solved_challenges': Submission.query.filter_by(user_id=u.id, is_correct=True).count()
+    } for u in users]
+
+    return jsonify(user_data)
+
+@app.route("/admin/challenges")
+def admin_challenges():
+    """Get all challenges for admin panel"""
+    token_value = request.headers.get("Authorization")
+    user = verify_token(token_value)
+
+    if not user or not user.is_admin:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    challenges = Challenge.query.all()
+
+    challenge_data = [{
+        'id': c.id,
+        'name': c.name,
+        'description': c.description,
+        'category': c.category,
+        'difficulty': c.difficulty,
+        'points': c.points,
+        'challenge_id': c.challenge_id,
+        'is_active': c.is_active,
+        'created_at': c.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+        'solve_count': Submission.query.filter_by(challenge_id=c.id, is_correct=True).count()
+    } for c in challenges]
+
+    return jsonify(challenge_data)
+
+@app.route("/admin/submissions")
+def admin_submissions():
+    """Get recent submissions for admin panel"""
+    token_value = request.headers.get("Authorization")
+    user = verify_token(token_value)
+
+    if not user or not user.is_admin:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    submissions = Submission.query.order_by(Submission.submitted_at.desc()).limit(100).all()
+
+    submission_data = [{
+        'id': s.id,
+        'username': User.query.get(s.user_id).username if User.query.get(s.user_id) else 'Unknown',
+        'challenge_name': Challenge.query.get(s.challenge_id).name if Challenge.query.get(s.challenge_id) else 'Unknown',
+        'is_correct': s.is_correct,
+        'points_awarded': s.points_awarded,
+        'submitted_at': s.submitted_at.strftime('%Y-%m-%d %H:%M:%S')
+    } for s in submissions]
+
+    return jsonify(submission_data)
+
+@app.route("/admin/toggle-challenge/<int:challenge_id>", methods=["POST"])
+def toggle_challenge(challenge_id):
+    """Toggle a challenge's active status"""
+    token_value = request.headers.get("Authorization")
+    user = verify_token(token_value)
+
+    if not user or not user.is_admin:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    challenge = Challenge.query.get(challenge_id)
+    if not challenge:
+        return jsonify({"error": "Challenge not found"}), 404
+
+    challenge.is_active = not challenge.is_active
+    db.session.commit()
+
+    return jsonify({
+        'id': challenge.id,
+        'name': challenge.name,
+        'is_active': challenge.is_active
+    })
+
+@app.route("/admin/make-admin/<int:user_id>", methods=["POST"])
+def make_admin(user_id):
+    """Make a user an admin"""
+    token_value = request.headers.get("Authorization")
+    admin_user = verify_token(token_value)
+
+    if not admin_user or not admin_user.is_admin:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    user.is_admin = True
+    db.session.commit()
+
+    return jsonify({
+        'id': user.id,
+        'username': user.username,
+        'is_admin': user.is_admin
+    })
+
+@app.route("/admin/add-challenge", methods=["POST"])
+def add_challenge():
+    """Add a new challenge"""
+    token_value = request.headers.get("Authorization")
+    admin_user = verify_token(token_value)
+
+    if not admin_user or not admin_user.is_admin:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    data = request.json
+
+    # Validate required fields
+    required_fields = ['name', 'description', 'category', 'difficulty', 'points', 'challenge_id']
+    for field in required_fields:
+        if field not in data or not data[field]:
+            return jsonify({"error": f"Missing required field: {field}"}), 400
+
+    # Check if challenge_id already exists
+    existing_challenge = Challenge.query.filter_by(challenge_id=data['challenge_id']).first()
+    if existing_challenge:
+        return jsonify({"error": f"Challenge ID '{data['challenge_id']}' already exists"}), 400
+
+    # Create challenge directory if it doesn't exist
+    challenge_dir = os.path.join(CHALLENGE_BASE, data['challenge_id'])
+    os.makedirs(challenge_dir, exist_ok=True)
+
+    # Create a basic challenge.py file if it doesn't exist
+    challenge_file = os.path.join(challenge_dir, 'challenge.py')
+    if not os.path.exists(challenge_file):
+        challenge_content = f'''
+# Basic challenge template
+from flask import Flask, request, render_template_string, jsonify, redirect
+import os
+import requests
+
+app = Flask(__name__)
+
+# Get flag from environment variable
+FLAG = os.environ.get('FLAG', 'flag{{placeholder}}')
+# Get main site URL (default to localhost if not provided)
+MAIN_SITE = os.environ.get('MAIN_SITE', 'http://localhost:5002')
+# Get challenge ID and container ID
+CHALLENGE_ID = os.environ.get('CHALLENGE_ID', '')
+CONTAINER_ID = os.environ.get('CONTAINER_ID', '')
+
+@app.route('/')
+def index():
+    return render_template_string("""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{{ challenge_name }}</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; margin: 40px; line-height: 1.6; }}
+        h1 {{ color: #333; }}
+        .container {{ max-width: 800px; margin: 0 auto; }}
+        .flag-form {{ margin-top: 30px; padding: 20px; border: 1px solid #ddd; border-radius: 5px; }}
+        .flag-input {{ width: 100%; padding: 10px; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 4px; }}
+        .submit-btn {{ background-color: #4CAF50; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; }}
+        .submit-btn:hover {{ background-color: #45a049; }}
+        .message {{ margin-top: 20px; padding: 10px; border-radius: 4px; }}
+        .success {{ background-color: #dff0d8; color: #3c763d; border: 1px solid #d6e9c6; }}
+        .error {{ background-color: #f2dede; color: #a94442; border: 1px solid #ebccd1; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>{{ challenge_name }}</h1>
+        <p>{{ challenge_description }}</p>
+        <p>Can you find the flag?</p>
+
+        <div class="flag-form">
+            <h3>Submit Flag</h3>
+            <form id="flag-form" action="/submit-flag" method="post">
+                <input type="text" id="flag" name="flag" class="flag-input" placeholder="Enter flag here (e.g., flag{{...}})" required>
+                <button type="submit" class="submit-btn">Submit Flag</button>
+            </form>
+            <div id="message" class="message" style="display: none;"></div>
+        </div>
+
+        <!-- Success message that shows briefly before redirect -->
+        <div id="success-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.8); z-index: 1000;">
+            <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background-color: white; padding: 30px; border-radius: 10px; text-align: center;">
+                <div style="color: #28a745; font-size: 48px; margin-bottom: 20px;">✓</div>
+                <h2 style="color: #28a745; margin-bottom: 15px;">Flag Correct!</h2>
+                <p>Congratulations! You've solved the challenge.</p>
+                <p style="margin-bottom: 20px;">Closing challenge and redirecting to main site...</p>
+                <div style="display: flex; justify-content: center; align-items: center; margin-bottom: 15px;">
+                    <div style="width: 20px; height: 20px; border: 3px solid #f3f3f3; border-top: 3px solid #28a745; border-radius: 50%; animation: spin 1s linear infinite; margin-right: 10px;"></div>
+                    <span>Stopping container...</span>
+                </div>
+                <div style="width: 100%; height: 4px; background-color: #f3f3f3; margin-top: 20px; border-radius: 2px; overflow: hidden;">
+                    <div id="progress-bar" style="height: 100%; width: 0%; background-color: #28a745; transition: width 2s linear;"></div>
+                </div>
+            </div>
+        </div>
+        <style>
+            @keyframes spin {{
+                0% {{ transform: rotate(0deg); }}
+                100% {{ transform: rotate(360deg); }}
+            }}
+        </style>
+    </div>
+
+    <script>
+        // Make variables available to JavaScript
+        const FLAG = "{{FLAG}}";
+        const MAIN_SITE = "{{MAIN_SITE}}";
+        const CHALLENGE_ID = "{{CHALLENGE_ID}}";
+        const CONTAINER_ID = "{{CONTAINER_ID}}";
+
+        // Handle form submission
+        document.getElementById('flag-form').addEventListener('submit', function(e) {{
+            // Always prevent default form submission
+            e.preventDefault();
+
+            // Get the flag value
+            const flag = document.getElementById('flag').value.trim();
+
+            // If flag is correct, show success overlay before redirecting
+            if (flag === FLAG) {{
+                document.getElementById('success-overlay').style.display = 'block';
+                document.getElementById('progress-bar').style.width = '100%';
+
+                // Add a message that the challenge is being closed
+                const message = document.createElement('div');
+                message.style.position = 'fixed';
+                message.style.top = '10px';
+                message.style.left = '50%';
+                message.style.transform = 'translateX(-50%)';
+                message.style.backgroundColor = '#28a745';
+                message.style.color = 'white';
+                message.style.padding = '10px 20px';
+                message.style.borderRadius = '5px';
+                message.style.zIndex = '2000';
+                message.textContent = 'Challenge completed! Redirecting to main site...';
+                document.body.appendChild(message);
+
+                // Submit the flag via AJAX
+                fetch('/submit-flag', {{
+                    method: 'POST',
+                    headers: {{
+                        'Content-Type': 'application/json'
+                    }},
+                    body: JSON.stringify({{
+                        flag: flag
+                    }})
+                }})
+                .then(response => response.json())
+                .then(data => {{
+                    if (data.success) {{
+                        console.log('Flag submission successful, redirecting to:', data.redirect_url);
+                        // Redirect to the URL provided by the server
+                        setTimeout(() => {{
+                            window.location.href = data.redirect_url;
+                        }}, 2000);
+                    }}
+                }})
+                .catch(error => {{
+                    console.error('Error submitting flag:', error);
+                    // Fallback redirect if the AJAX call fails
+                    setTimeout(() => {{
+                        const redirectUrl = `${MAIN_SITE}?flag_success=true&challenge=${CHALLENGE_ID}&container_id=${CONTAINER_ID}&auto_show=true`;
+                        console.log('Fallback redirect to:', redirectUrl);
+                        window.location.href = redirectUrl;
+                    }}, 2000);
+                }});
+            }} else {{
+                // If flag is incorrect, submit via AJAX
+                fetch('/submit-flag', {{
+                    method: 'POST',
+                    headers: {{
+                        'Content-Type': 'application/json'
+                    }},
+                    body: JSON.stringify({{
+                        flag: flag
+                    }})
+                }})
+                .then(response => response.json())
+                .then(data => {{
+                    if (!data.success) {{
+                        // Show error message
+                        const messageDiv = document.getElementById('message');
+                        if (messageDiv) {{
+                            messageDiv.className = 'message error';
+                            messageDiv.style.display = 'block';
+                            messageDiv.textContent = data.message || 'Incorrect flag. Try again!';
+
+                            // Hide the message after 3 seconds
+                            setTimeout(() => {{
+                                messageDiv.style.display = 'none';
+                            }}, 3000);
+                        }}
+                    }}
+                }})
+                .catch(error => {{
+                    console.error('Error submitting flag:', error);
+                }});
+            }}
+        }});
+    </script>
+</body>
+</html>
+""", challenge_name="{data['name']}", challenge_description="{data['description']}")
+
+@app.route('/submit-flag', methods=['POST', 'GET'])
+def submit_flag():
+    if request.method == 'POST':
+        try:
+            # Handle both JSON and form data
+            if request.is_json:
+                data = request.get_json()
+                submitted_flag = data.get('flag', '')
+            else:
+                submitted_flag = request.form.get('flag', '')
+
+            if submitted_flag == FLAG:
+                # Flag is correct
+                # Get container ID and challenge ID from environment variables
+                container_id = os.environ.get('CONTAINER_ID', '')
+                challenge_id = os.environ.get('CHALLENGE_ID', '')
+                main_site = os.environ.get('MAIN_SITE', 'http://localhost:5002')
+
+                # Try to stop the container
+                try:
+                    import subprocess
+                    if container_id:
+                        # Execute the command to stop the container - use check_call for synchronous execution
+                        print(f"Stopping container {container_id} after successful flag submission")
+                        # Use Popen with a timeout to avoid blocking the redirect
+                        stop_process = subprocess.Popen(['docker', 'stop', container_id])
+                        # Don't wait for completion - we want to redirect quickly
+                        # The main site will handle cleanup if needed
+                except Exception as e:
+                    print(f"Error stopping container: {e}")
+
+                # For AJAX requests, return JSON
+                if request.is_json:
+                    return jsonify({{
+                        'success': True,
+                        'message': 'Congratulations! Flag is correct! Redirecting to main site...',
+                        'redirect_url': f"{{MAIN_SITE}}?flag_success=true&challenge={{challenge_id}}&container_id={{container_id}}&auto_show=true"
+                    }})
+                # For form submissions, redirect directly
+                else:
+                    redirect_url = f"{{MAIN_SITE}}?flag_success=true&challenge={{challenge_id}}&container_id={{container_id}}&auto_show=true"
+                    return render_template_string("""
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <title>Correct Flag</title>
+                        <meta http-equiv="refresh" content="2;url={{{{ redirect_url }}}}" />
+                        <style>
+                            body {{ font-family: Arial, sans-serif; text-align: center; margin-top: 50px; background-color: #f8f9fa; }}
+                            .success {{ color: #28a745; }}
+                            .container {{ max-width: 600px; margin: 0 auto; padding: 20px; background-color: white; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }}
+                            .redirect-info {{ margin-top: 20px; color: #6c757d; font-size: 14px; }}
+                        </style>
+                    </head>
+                    <body>
+                        <div class="container">
+                            <h2 class="success">Flag Correct!</h2>
+                            <p>Congratulations! You've solved the challenge.</p>
+                            <p>Redirecting to main site in 2 seconds...</p>
+                            <div class="redirect-info">If you are not redirected automatically, <a href="{{{{ redirect_url }}}}">click here</a>.</div>
+                        </div>
+                        <script>
+                            // Ensure we redirect even if meta refresh fails
+                            setTimeout(function() {{
+                                window.location.href = "{{{{ redirect_url }}}}";
+                            }}, 2000);
+                        </script>
+                    </body>
+                    </html>
+                    """, redirect_url=redirect_url)
+            else:
+                # Flag is incorrect
+                if request.is_json:
+                    return jsonify({{
+                        'success': False,
+                        'message': 'Incorrect flag. Try again!'
+                    }})
+                else:
+                    return render_template_string("""
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <title>Incorrect Flag</title>
+                        <meta http-equiv="refresh" content="2;url=/" />
+                        <style>
+                            body { font-family: Arial, sans-serif; text-align: center; margin-top: 50px; }
+                            .error { color: #dc3545; }
+                        </style>
+                    </head>
+                    <body>
+                        <h2 class="error">Incorrect Flag</h2>
+                        <p>Please try again. Redirecting back to challenge...</p>
+                    </body>
+                    </html>
+                    """)
+        except Exception as e:
+            return jsonify({{
+                'success': False,
+                'message': f'Error processing submission: {{str(e)}}'
+            }})
+        else:
+            # Flag is incorrect
+            return jsonify({{
+                'success': False,
+                'message': 'Incorrect flag. Try again!'
+            }})
+    except Exception as e:
+        return jsonify({{
+            'success': False,
+            'message': f'Error processing submission: {{str(e)}}'
+        }})
+
+@app.route('/flag')
+def get_flag():
+    # This is just a placeholder - you should implement your own challenge logic
+    return jsonify({{'message': 'Not that easy! Solve the challenge to get the flag.'}})
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
+'''
+
+        with open(challenge_file, 'w') as f:
+            f.write(challenge_content)
+
+    # Create new challenge in database
+    challenge = Challenge(
+        name=data['name'],
+        description=data['description'],
+        category=data['category'],
+        difficulty=data['difficulty'],
+        points=data['points'],
+        challenge_id=data['challenge_id'],
+        is_active=True
+    )
+
+    db.session.add(challenge)
+    db.session.commit()
+
+    return jsonify({
+        'id': challenge.id,
+        'name': challenge.name,
+        'description': challenge.description,
+        'category': challenge.category,
+        'difficulty': challenge.difficulty,
+        'points': challenge.points,
+        'challenge_id': challenge.challenge_id,
+        'is_active': challenge.is_active
+    })
 
 @app.route("/test")
 def test():
     return jsonify({"status": "ok", "message": "Server is running"})
 
+@app.route("/submit-flag-main", methods=["POST"])
+def submit_flag_main():
+    """Submit a flag for a challenge from the main site"""
+    data = request.json
+    flag = data.get("flag")
+    challenge_id = data.get("challenge_id")
+    token_value = request.headers.get("Authorization")
+
+    if not flag or not challenge_id:
+        return jsonify({"error": "Flag and challenge ID are required"}), 400
+
+    # Verify user token
+    user = verify_token(token_value)
+    if not user:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    # Get the challenge
+    challenge = Challenge.query.filter_by(challenge_id=challenge_id).first()
+    if not challenge:
+        return jsonify({"error": "Challenge not found"}), 404
+
+    # Generate the expected flag
+    expected_flag = generate_flag(user.username, challenge_id)
+
+    # Check if the flag is correct
+    is_correct = (flag == expected_flag)
+
+    # Record the submission
+    submission = Submission(
+        user_id=user.id,
+        challenge_id=challenge.id,
+        flag=flag,
+        is_correct=is_correct,
+        points_awarded=challenge.points if is_correct else 0
+    )
+    db.session.add(submission)
+
+    # If correct, award points to the user
+    if is_correct:
+        # Check if this is the first correct submission for this challenge
+        previous_correct = Submission.query.filter_by(
+            user_id=user.id,
+            challenge_id=challenge.id,
+            is_correct=True
+        ).first()
+
+        if not previous_correct:
+            user.points += challenge.points
+            db.session.commit()
+            return jsonify({
+                "success": True,
+                "message": f"Congratulations! You earned {challenge.points} points!",
+                "points_earned": challenge.points,
+                "total_points": user.points
+            })
+        else:
+            return jsonify({
+                "success": True,
+                "message": "Correct flag! You've already solved this challenge.",
+                "points_earned": 0,
+                "total_points": user.points
+            })
+    else:
+        db.session.commit()
+        return jsonify({
+            "success": False,
+            "message": "Incorrect flag. Try again!"
+        })
+
 @app.route("/challenges")
 def get_challenges():
-    # Return a list of available challenges
-    return jsonify(list(challenges.keys()))
+    # Get challenges from the database
+    db_challenges = Challenge.query.filter_by(is_active=True).all()
+
+    # If no challenges in DB, return directory-based challenges
+    if not db_challenges:
+        # Get challenges from directory
+        challenge_dirs = []
+        for challenge in os.listdir(CHALLENGE_BASE):
+            if os.path.isdir(os.path.join(CHALLENGE_BASE, challenge)) and not challenge.startswith('.'):
+                challenge_dirs.append(challenge)
+        return jsonify(challenge_dirs)
+
+    # Return challenges from database
+    challenge_list = [{
+        'id': c.challenge_id,
+        'name': c.name,
+        'description': c.description,
+        'category': c.category,
+        'difficulty': c.difficulty,
+        'points': c.points
+    } for c in db_challenges]
+
+    return jsonify(challenge_list)
 
 def cleanup_expired_containers():
     """Clean up containers that have exceeded their timeout"""
@@ -571,25 +1443,82 @@ def start_cleanup_thread():
     print(f"Started background cleanup thread (checking every 30 seconds)")
     return thread
 
+def init_challenges():
+    """Initialize challenges from the challenges directory"""
+    print(f"Challenge base directory: {CHALLENGE_BASE}")
+
+    # Check if we need to initialize the database with challenges
+    with app.app_context():
+        if Challenge.query.count() == 0:
+            print("Initializing challenges in the database...")
+            # Define challenge categories and difficulties
+            categories = {
+                'web': ['web-basic', 'web-sqli'],
+                'crypto': ['crypto-101'],
+                'forensics': ['forensics-pcap', 'forensics-stego', 'forensics-carving'],
+                'reverse': ['reverse-engineering']
+            }
+
+            difficulties = {
+                'web-basic': 'easy',
+                'web-sqli': 'medium',
+                'crypto-101': 'easy',
+                'forensics-pcap': 'medium',
+                'forensics-stego': 'hard',
+                'forensics-carving': 'hard',
+                'reverse-engineering': 'medium'
+            }
+
+            points = {
+                'easy': 100,
+                'medium': 250,
+                'hard': 500
+            }
+
+            # Add challenges to the database
+            for challenge_dir in os.listdir(CHALLENGE_BASE):
+                if os.path.isdir(os.path.join(CHALLENGE_BASE, challenge_dir)) and not challenge_dir.startswith('.'):
+                    # Determine category
+                    category = None
+                    for cat, challenges in categories.items():
+                        if challenge_dir in challenges:
+                            category = cat
+                            break
+                    if not category:
+                        category = challenge_dir.split('-')[0] if '-' in challenge_dir else 'misc'
+
+                    # Determine difficulty
+                    difficulty = difficulties.get(challenge_dir, 'medium')
+
+                    # Create challenge name
+                    name = ' '.join(word.capitalize() for word in challenge_dir.split('-'))
+
+                    # Create challenge
+                    challenge = Challenge(
+                        name=name,
+                        description=f"A {difficulty} {category} challenge",
+                        category=category,
+                        difficulty=difficulty,
+                        points=points.get(difficulty, 200),
+                        challenge_id=challenge_dir,
+                        is_active=True
+                    )
+                    db.session.add(challenge)
+
+            db.session.commit()
+            print("Challenges initialized in the database.")
+
 if __name__ == "__main__":
     # Clean up any stale containers from previous runs
     cleanup_stale_containers()
-    CHALLENGE_BASE = "./challenges"
-    DOCKER_TEMPLATE = """
-FROM python:3.9-slim
-WORKDIR /app
-RUN pip install flask
-COPY . .
-CMD ["python", "challenge.py"]
-"""
-    # Preprocess challenges
-    for challenge in os.listdir(CHALLENGE_BASE):
-        print(f"Loading challenge: {challenge}")
-        challenges[challenge] = {
-            "dockerfile": DOCKER_TEMPLATE,
-            "template": os.path.join(CHALLENGE_BASE, challenge, "challenge.py")
-        }
-        os.makedirs(os.path.join(CHALLENGE_BASE, challenge), exist_ok=True)
+
+    # Create database tables
+    with app.app_context():
+        db.create_all()
+        print("Database tables created.")
+
+    # Initialize challenges
+    init_challenges()
 
     # Start the cleanup thread
     cleanup_thread = start_cleanup_thread()

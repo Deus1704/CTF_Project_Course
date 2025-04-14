@@ -33,11 +33,57 @@
         <section id="challenge-section" class="challenge-container hidden">
             <div class="user-info">
                 <h2 id="welcome-message"></h2>
-                <button id="logout-btn">Logout</button>
+                <div class="user-controls">
+                    <button id="show-profile-btn" class="btn-secondary">My Profile</button>
+                    <button id="show-leaderboard-btn" class="btn-secondary">Leaderboard</button>
+                    <button id="logout-btn">Logout</button>
+                </div>
             </div>
 
-            <h2>Available Challenges</h2>
-            <div id="challenge-list">
+            <!-- User Profile Section (hidden by default) -->
+            <div id="user-profile" class="profile-container hidden">
+                <div class="profile-header">
+                    <h2>My Profile</h2>
+                    <button id="back-to-challenges" class="btn-secondary">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="19" y1="12" x2="5" y2="12"></line>
+                            <polyline points="12 19 5 12 12 5"></polyline>
+                        </svg>
+                        Back to Challenges
+                    </button>
+                </div>
+                <div id="solved-challenges" class="solved-challenges">
+                    <!-- Solved challenges will be inserted here by JavaScript -->
+                </div>
+                <div id="achievements" class="achievements">
+                    <!-- Achievements will be inserted here by JavaScript -->
+                </div>
+            </div>
+
+            <!-- Leaderboard Section (hidden by default) -->
+            <div id="leaderboard" class="leaderboard-container hidden">
+                <!-- Leaderboard will be inserted here by JavaScript -->
+            </div>
+
+            <div class="challenges-header">
+                <h2>Available Challenges</h2>
+                <div class="filter-controls">
+                    <select id="category-filter">
+                        <option value="all">All Categories</option>
+                        <option value="web">Web</option>
+                        <option value="crypto">Crypto</option>
+                        <option value="forensics">Forensics</option>
+                        <option value="reverse">Reverse Engineering</option>
+                    </select>
+                    <select id="difficulty-filter">
+                        <option value="all">All Difficulties</option>
+                        <option value="easy">Easy</option>
+                        <option value="medium">Medium</option>
+                        <option value="hard">Hard</option>
+                    </select>
+                </div>
+            </div>
+            <div id="challenge-list" class="challenge-list">
                 <!-- Challenge cards will be inserted here by JavaScript -->
             </div>
         </section>
@@ -53,6 +99,49 @@
         </div>
     </div>
 
+    <script>
+        // Pass server-side data to JavaScript
+        const serverData = {
+            flagSuccess: {{ flag_success|tojson }},
+            challengeId: {{ challenge_id|tojson }},
+            containerId: {{ container_id|tojson }},
+            autoShow: {{ auto_show|tojson }},
+            pointsEarned: {{ points_earned|tojson }},
+            challengeName: {{ challenge_name|tojson }},
+            showCelebration: {{ show_celebration|default(false)|tojson }},
+            challengeSolved: {{ challenge_solved|default(false)|tojson }}
+        };
+    </script>
+
+    {% if show_celebration %}
+    <!-- Auto-triggered celebration overlay -->
+    <div id="celebration-overlay" class="celebration-overlay">
+        <div class="celebration-content">
+            <div class="trophy-icon">
+                <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"></path>
+                    <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"></path>
+                    <path d="M4 22h16"></path>
+                    <path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"></path>
+                    <path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"></path>
+                    <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"></path>
+                </svg>
+            </div>
+            <h2>Challenge Completed!</h2>
+            <p>Congratulations! You've successfully solved {{ challenge_name }}.</p>
+            <div class="points-earned">+{{ points_earned }} points</div>
+            <div class="challenge-status-info">
+                <div class="status-icon success">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="20 6 9 17 4 12"></polyline>
+                    </svg>
+                </div>
+                <span>Challenge container has been closed</span>
+            </div>
+            <button id="close-celebration" class="btn-primary">Continue</button>
+        </div>
+    </div>
+    {% endif %}
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>
 </html>
