@@ -1,1 +1,20 @@
+# Core application dependencies
 Flask==2.3.2
+Werkzeug==2.3.6
+SQLAlchemy==2.0.19
+Flask-SQLAlchemy==3.0.5
+
+# Image processing (used in forensics-stego)
+Pillow==10.1.0
+numpy==1.26.2
+
+# Security and hashing
+cryptography==41.0.1
+
+# For running the application
+gunicorn==21.2.0
+
+# Additional tools (these will be installed via apt in Docker)
+# wireshark-common
+# tshark
+# tcpreplay
