@@ -15,33 +15,33 @@ document.addEventListener('DOMContentLoaded', function() {
     const adminLoginForm = document.getElementById('admin-login-form');
     const adminLogoutBtn = document.getElementById('admin-logout-btn');
     const adminUsername = document.getElementById('admin-username');
-    
+
     // Tab elements
     const tabButtons = document.querySelectorAll('.tab-button');
     const tabPanes = document.querySelectorAll('.tab-pane');
-    
+
     // Table elements
     const usersTable = document.getElementById('users-table');
     const challengesTable = document.getElementById('challenges-table');
     const submissionsTable = document.getElementById('submissions-table');
-    
+
     // Search inputs
     const userSearch = document.getElementById('user-search');
     const challengeSearch = document.getElementById('challenge-search');
     const submissionSearch = document.getElementById('submission-search');
-    
+
     // Refresh buttons
     const refreshUsers = document.getElementById('refresh-users');
     const refreshChallenges = document.getElementById('refresh-challenges');
     const refreshSubmissions = document.getElementById('refresh-submissions');
     const refreshStats = document.getElementById('refresh-stats');
-    
+
     // Add challenge button and modal
     const addChallengeBtn = document.getElementById('add-challenge');
     const addChallengeModal = document.getElementById('add-challenge-modal');
     const addChallengeForm = document.getElementById('add-challenge-form');
     const modalClose = document.querySelector('.modal-close');
-    
+
     // Check if admin is already logged in (from localStorage)
     const savedAdmin = localStorage.getItem('ctf_admin');
     if (savedAdmin) {
@@ -57,99 +57,99 @@ document.addEventListener('DOMContentLoaded', function() {
             localStorage.removeItem('ctf_admin');
         }
     }
-    
+
     // Admin login form submission
     if (adminLoginForm) {
         adminLoginForm.addEventListener('submit', function(e) {
             e.preventDefault();
             const username = document.getElementById('admin-username-input').value;
             const password = document.getElementById('admin-password-input').value;
-            
+
             if (username && password) {
                 login(username, password);
             }
         });
     }
-    
+
     // Admin logout button
     if (adminLogoutBtn) {
         adminLogoutBtn.addEventListener('click', function() {
             logout();
         });
     }
-    
+
     // Tab switching
     tabButtons.forEach(button => {
         button.addEventListener('click', function() {
             // Remove active class from all buttons and panes
             tabButtons.forEach(btn => btn.classList.remove('active'));
             tabPanes.forEach(pane => pane.classList.remove('active'));
-            
+
             // Add active class to clicked button and corresponding pane
             this.classList.add('active');
             const tabId = this.getAttribute('data-tab');
             document.getElementById(tabId).classList.add('active');
         });
     });
-    
+
     // Search functionality
     if (userSearch) {
         userSearch.addEventListener('input', function() {
             filterTable(usersTable, this.value);
         });
     }
-    
+
     if (challengeSearch) {
         challengeSearch.addEventListener('input', function() {
             filterTable(challengesTable, this.value);
         });
     }
-    
+
     if (submissionSearch) {
         submissionSearch.addEventListener('input', function() {
             filterTable(submissionsTable, this.value);
         });
     }
-    
+
     // Refresh buttons
     if (refreshUsers) {
         refreshUsers.addEventListener('click', function() {
             loadUsers();
         });
     }
-    
+
     if (refreshChallenges) {
         refreshChallenges.addEventListener('click', function() {
             loadChallenges();
         });
     }
-    
+
     if (refreshSubmissions) {
         refreshSubmissions.addEventListener('click', function() {
             loadSubmissions();
         });
     }
-    
+
     if (refreshStats) {
         refreshStats.addEventListener('click', function() {
             loadStats();
         });
     }
-    
+
     // Add challenge modal
     if (addChallengeBtn) {
         addChallengeBtn.addEventListener('click', function() {
             if (addChallengeModal) {
                 addChallengeModal.style.display = 'block';
-                
+
                 // Set default points based on difficulty
                 const difficultySelect = document.getElementById('challenge-difficulty');
                 const pointsInput = document.getElementById('challenge-points');
-                
+
                 if (difficultySelect && pointsInput) {
                     // Set initial value
                     updatePointsBasedOnDifficulty(difficultySelect.value, pointsInput);
-                    
+
                     // Update when difficulty changes
                     difficultySelect.addEventListener('change', function() {
                         updatePointsBasedOnDifficulty(this.value, pointsInput);
@@ -158,7 +158,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
-    
+
     // Close modal
     if (modalClose) {
         modalClose.addEventListener('click', function() {
@@ -167,19 +167,19 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
-    
+
     // Close modal when clicking outside
     window.addEventListener('click', function(event) {
         if (event.target === addChallengeModal) {
             addChallengeModal.style.display = 'none';
         }
     });
-    
+
     // Add challenge form submission
     if (addChallengeForm) {
         addChallengeForm.addEventListener('submit', function(e) {
             e.preventDefault();
-            
+
             const formData = {
                 name: document.getElementById('challenge-name').value,
                 description: document.getElementById('challenge-description').value,
@@ -188,11 +188,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 points: parseInt(document.getElementById('challenge-points').value),
                 challenge_id: document.getElementById('challenge-id').value
             };
-            
+
             addChallenge(formData);
         });
     }
-    
+
     // Helper function to update points based on difficulty
     function updatePointsBasedOnDifficulty(difficulty, pointsInput) {
         switch (difficulty) {
@@ -209,14 +209,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 pointsInput.value = 100;
         }
     }
-    
+
     // Helper function to filter tables
     function filterTable(table, query) {
         if (!table || !query) return;
-        
+
         const rows = table.querySelectorAll('tbody tr');
         const lowerQuery = query.toLowerCase();
-        
+
         rows.forEach(row => {
             const text = row.textContent.toLowerCase();
             if (text.includes(lowerQuery)) {
@@ -226,11 +226,11 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
-    
+
     // API functions
     async function login(username, password) {
         try {
-            const response = await fetch('/login', {
+            const response = await fetch('/admin/login', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -240,43 +240,30 @@ document.addEventListener('DOMContentLoaded', function() {
                     password: password
                 })
             });
-            
+
             const data = await response.json();
-            
+
             if (response.ok) {
-                // Check if user is admin
-                const userResponse = await fetch('/user/profile', {
-                    headers: {
-                        'Authorization': data.token
-                    }
-                });
-                
-                if (userResponse.ok) {
-                    const userData = await userResponse.json();
-                    
-                    // Store admin data
-                    adminData = {
-                        username: data.username,
-                        token: data.token,
-                        isLoggedIn: true,
-                        isAdmin: userData.is_admin || false
-                    };
-                    
-                    if (adminData.isAdmin) {
-                        // Save to localStorage
-                        localStorage.setItem('ctf_admin', JSON.stringify(adminData));
-                        
-                        // Show admin dashboard
-                        showAdminDashboard();
-                        
-                        // Load all data
-                        loadAllData();
-                    } else {
-                        showError('You do not have admin privileges.');
-                        logout();
-                    }
+                // Store admin data
+                adminData = {
+                    username: data.username,
+                    token: data.token,
+                    isLoggedIn: true,
+                    isAdmin: data.is_admin || false
+                };
+
+                if (adminData.isAdmin) {
+                    // Save to localStorage
+                    localStorage.setItem('ctf_admin', JSON.stringify(adminData));
+
+                    // Show admin dashboard
+                    showAdminDashboard();
+
+                    // Load all data
+                    loadAllData();
                 } else {
-                    showError('Failed to get user profile.');
+                    showError('You do not have admin privileges.');
+                    logout();
                 }
             } else {
                 showError('Login failed: ' + (data.error || 'Unknown error'));
@@ -286,7 +273,7 @@ document.addEventListener('DOMContentLoaded', function() {
             showError('Login failed. Please try again.');
         }
     }
-    
+
     function logout() {
         adminData = {
             username: '',
@@ -294,28 +281,28 @@ document.addEventListener('DOMContentLoaded', function() {
             isLoggedIn: false,
             isAdmin: false
         };
-        
+
         // Remove from localStorage
         localStorage.removeItem('ctf_admin');
-        
+
         // Show login section
         if (adminLoginSection) adminLoginSection.classList.remove('hidden');
         if (adminDashboard) adminDashboard.classList.add('hidden');
     }
-    
+
     function showAdminDashboard() {
         if (adminLoginSection) adminLoginSection.classList.add('hidden');
         if (adminDashboard) adminDashboard.classList.remove('hidden');
         if (adminUsername) adminUsername.textContent = adminData.username;
     }
-    
+
     function loadAllData() {
         loadUsers();
         loadChallenges();
         loadSubmissions();
         loadStats();
     }
-    
+
     async function loadUsers() {
         try {
             const response = await fetch('/admin/users', {
@@ -323,7 +310,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     'Authorization': adminData.token
                 }
             });
-            
+
             if (response.ok) {
                 const users = await response.json();
                 renderUsersTable(users);
@@ -337,7 +324,7 @@ document.addEventListener('DOMContentLoaded', function() {
             showError('Failed to load users. Please try again.');
         }
     }
-    
+
     async function loadChallenges() {
         try {
             const response = await fetch('/admin/challenges', {
@@ -345,7 +332,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     'Authorization': adminData.token
                 }
             });
-            
+
             if (response.ok) {
                 const challenges = await response.json();
                 renderChallengesTable(challenges);
@@ -361,7 +348,7 @@ document.addEventListener('DOMContentLoaded', function() {
             showError('Failed to load challenges. Please try again.');
         }
     }
-    
+
     async function loadSubmissions() {
         try {
             const response = await fetch('/admin/submissions', {
@@ -369,7 +356,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     'Authorization': adminData.token
                 }
             });
-            
+
             if (response.ok) {
                 const submissions = await response.json();
                 renderSubmissionsTable(submissions);
@@ -384,12 +371,12 @@ document.addEventListener('DOMContentLoaded', function() {
             showError('Failed to load submissions. Please try again.');
         }
     }
-    
+
     async function loadStats() {
         // This function will be called by the individual data loading functions
         // to update the stats cards and charts
     }
-    
+
     function updateStats(type, value) {
         switch (type) {
             case 'users':
@@ -406,65 +393,65 @@ document.addEventListener('DOMContentLoaded', function() {
                 break;
         }
     }
-    
+
     function updateDifficultyChart(challenges) {
         const easy = challenges.filter(c => c.difficulty === 'easy').length;
         const medium = challenges.filter(c => c.difficulty === 'medium').length;
         const hard = challenges.filter(c => c.difficulty === 'hard').length;
         const total = challenges.length;
-        
+
         if (total === 0) return;
-        
+
         const easyPercent = (easy / total) * 100;
         const mediumPercent = (medium / total) * 100;
         const hardPercent = (hard / total) * 100;
-        
+
         document.querySelector('.easy-bar').style.height = `${easyPercent}%`;
         document.querySelector('.medium-bar').style.height = `${mediumPercent}%`;
         document.querySelector('.hard-bar').style.height = `${hardPercent}%`;
     }
-    
+
     function updateCategoryChart(challenges) {
         // Get all unique categories
         const categories = [...new Set(challenges.map(c => c.category))];
         const categoryBars = document.querySelector('.category-bars');
-        
+
         if (!categoryBars) return;
-        
+
         // Clear existing bars
         categoryBars.innerHTML = '';
-        
+
         // Count challenges by category
         const categoryCounts = {};
         categories.forEach(category => {
             categoryCounts[category] = challenges.filter(c => c.category === category).length;
         });
-        
+
         const total = challenges.length;
-        
+
         if (total === 0) return;
-        
+
         // Create bars for each category
         categories.forEach(category => {
             const percent = (categoryCounts[category] / total) * 100;
-            
+
             const bar = document.createElement('div');
             bar.className = 'chart-bar';
             bar.innerHTML = `
                 <div class="bar-fill ${category}-bar" style="height: ${percent}%"></div>
                 <div class="bar-label">${category}</div>
             `;
-            
+
             categoryBars.appendChild(bar);
         });
     }
-    
+
     function renderUsersTable(users) {
         if (!usersTable) return;
-        
+
         const tbody = usersTable.querySelector('tbody');
         tbody.innerHTML = '';
-        
+
         users.forEach(user => {
             const row = document.createElement('tr');
             row.innerHTML = `
@@ -483,9 +470,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     </div>
                 </td>
             `;
-            
+
             tbody.appendChild(row);
-            
+
             // Add event listeners for action buttons
             const makeAdminBtn = row.querySelector('.admin-btn');
             if (makeAdminBtn) {
@@ -496,13 +483,13 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
-    
+
     function renderChallengesTable(challenges) {
         if (!challengesTable) return;
-        
+
         const tbody = challengesTable.querySelector('tbody');
         tbody.innerHTML = '';
-        
+
         challenges.forEach(challenge => {
             const row = document.createElement('tr');
             row.innerHTML = `
@@ -521,9 +508,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     </div>
                 </td>
             `;
-            
+
             tbody.appendChild(row);
-            
+
             // Add event listeners for action buttons
             const toggleBtn = row.querySelector('.toggle-btn');
             if (toggleBtn) {
@@ -534,13 +521,13 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
-    
+
     function renderSubmissionsTable(submissions) {
         if (!submissionsTable) return;
-        
+
         const tbody = submissionsTable.querySelector('tbody');
         tbody.innerHTML = '';
-        
+
         submissions.forEach(submission => {
             const row = document.createElement('tr');
             row.innerHTML = `
@@ -551,11 +538,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 <td>${submission.points_awarded}</td>
                 <td>${submission.submitted_at}</td>
             `;
-            
+
             tbody.appendChild(row);
         });
     }
-    
+
     async function makeUserAdmin(userId) {
         try {
             const response = await fetch(`/admin/make-admin/${userId}`, {
@@ -564,7 +551,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     'Authorization': adminData.token
                 }
             });
-            
+
             if (response.ok) {
                 showSuccess('User has been made an admin.');
                 loadUsers();
@@ -577,7 +564,7 @@ document.addEventListener('DOMContentLoaded', function() {
             showError('Failed to make user admin. Please try again.');
         }
     }
-    
+
     async function toggleChallenge(challengeId) {
         try {
             const response = await fetch(`/admin/toggle-challenge/${challengeId}`, {
@@ -586,7 +573,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     'Authorization': adminData.token
                 }
             });
-            
+
             if (response.ok) {
                 const data = await response.json();
                 showSuccess(`Challenge "${data.name}" is now ${data.is_active ? 'active' : 'inactive'}.`);
@@ -600,7 +587,7 @@ document.addEventListener('DOMContentLoaded', function() {
             showError('Failed to toggle challenge. Please try again.');
         }
     }
-    
+
     async function addChallenge(formData) {
         try {
             const response = await fetch('/admin/add-challenge', {
@@ -611,20 +598,20 @@ document.addEventListener('DOMContentLoaded', function() {
                 },
                 body: JSON.stringify(formData)
             });
-            
+
             if (response.ok) {
                 showSuccess('Challenge added successfully.');
-                
+
                 // Close the modal
                 if (addChallengeModal) {
                     addChallengeModal.style.display = 'none';
                 }
-                
+
                 // Reset the form
                 if (addChallengeForm) {
                     addChallengeForm.reset();
                 }
-                
+
                 // Reload challenges
                 loadChallenges();
             } else {
@@ -636,7 +623,7 @@ document.addEventListener('DOMContentLoaded', function() {
             showError('Failed to add challenge. Please try again.');
         }
     }
-    
+
     // Notification functions
     function showSuccess(message) {
         const successMessage = document.createElement('div');
@@ -649,13 +636,13 @@ document.addEventListener('DOMContentLoaded', function() {
             </div>
         `;
         document.body.appendChild(successMessage);
-        
+
         // Add close button functionality
         const closeBtn = successMessage.querySelector('.close-success');
         closeBtn.addEventListener('click', function() {
             successMessage.remove();
         });
-        
+
         // Auto-remove after 5 seconds
         setTimeout(() => {
             if (document.body.contains(successMessage)) {
@@ -663,7 +650,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }, 5000);
     }
-    
+
     function showError(message) {
         const errorMessage = document.createElement('div');
         errorMessage.className = 'error-message';
@@ -675,13 +662,13 @@ document.addEventListener('DOMContentLoaded', function() {
             </div>
         `;
         document.body.appendChild(errorMessage);
-        
+
         // Add close button functionality
         const closeBtn = errorMessage.querySelector('.close-error');
         closeBtn.addEventListener('click', function() {
             errorMessage.remove();
         });
-        
+
         // Auto-remove after 5 seconds
         setTimeout(() => {
             if (document.body.contains(errorMessage)) {

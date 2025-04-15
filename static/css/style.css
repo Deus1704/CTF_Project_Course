@@ -648,31 +648,95 @@ input[type="text"], input[type="password"] {
 /* Leaderboard Styles */
 .leaderboard-container {
     background-color: #fff;
-    border-radius: 5px;
-    padding: 20px;
+    border-radius: 8px;
+    padding: 0;
     margin-bottom: 20px;
-    box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    box-shadow: 0 0 15px rgba(0,0,0,0.1);
+    overflow: hidden;
+}
+
+.leaderboard-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px;
+    background-color: #f8f9fa;
+    border-bottom: 1px solid #e9ecef;
+}
+
+.leaderboard-header h2 {
+    margin: 0;
+    color: #343a40;
+}
+
+.leaderboard-content {
+    padding: 20px;
 }
 
 .leaderboard-table {
     width: 100%;
     border-collapse: collapse;
-    margin-top: 15px;
+    margin-top: 0;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+    border-radius: 5px;
+    overflow: hidden;
 }
 
 .leaderboard-table th, .leaderboard-table td {
-    padding: 10px;
+    padding: 12px 15px;
     text-align: left;
-    border-bottom: 1px solid #ddd;
 }
 
 .leaderboard-table th {
     background-color: #f5f5f5;
     font-weight: bold;
+    color: #495057;
+    border-bottom: 2px solid #dee2e6;
+}
+
+.leaderboard-table tr {
+    border-bottom: 1px solid #e9ecef;
+    transition: background-color 0.2s;
+}
+
+.leaderboard-table tr:last-child {
+    border-bottom: none;
+}
+
+.leaderboard-table tr:hover {
+    background-color: #f8f9fa;
 }
 
 .leaderboard-table tr.current-user {
     background-color: #e8f4fd;
+    font-weight: bold;
+}
+
+.leaderboard-table tr.current-user td:first-child {
+    border-left: 3px solid #007bff;
+}
+
+/* Top 3 ranks styling */
+.leaderboard-table tr:nth-child(1) td:first-child {
+    color: #ffc107;
+    font-weight: bold;
+}
+
+.leaderboard-table tr:nth-child(2) td:first-child {
+    color: #6c757d;
+    font-weight: bold;
+}
+
+.leaderboard-table tr:nth-child(3) td:first-child {
+    color: #cd7f32;
+    font-weight: bold;
+}
+
+/* Error state */
+.error-state {
+    padding: 30px;
+    text-align: center;
+    color: #dc3545;
 }
 
 /* Filter Controls */

@@ -308,10 +308,46 @@ def login():
     db.session.commit()
 
     # Create response with token in JSON
-    response = jsonify({"token": token_value, "user_id": user.id, "username": user.username, "points": user.points})
+    response = jsonify({"token": token_value, "user_id": user.id, "username": user.username, "points": user.points, "is_admin": user.is_admin})
 
     # Set a cookie with the token for use with redirects from challenge containers
     response.set_cookie('ctf_token', token_value, httponly=True, max_age=86400)  # 24 hours
+
+    return response
+
+@app.route("/admin/login", methods=["POST"])
+def admin_login():
+    data = request.json
+    username = data.get("username")
+    password = data.get("password")
+
+    if not username or not password:
+        return jsonify({"error": "Username and password are required"}), 400
+
+    # Check if user exists and is an admin
+    user = User.query.filter_by(username=username).first()
+
+    if not user or not user.check_password(password):
+        return jsonify({"error": "Invalid credentials"}), 401
+
+    if not user.is_admin:
+        return jsonify({"error": "Unauthorized: Not an admin user"}), 403
+
+    # Update last login time
+    user.last_login = datetime.utcnow()
+    db.session.commit()
+
+    # Create a new token
+    token_value = secrets.token_urlsafe(32)
+    token = Token(user_id=user.id, token=token_value)
+    db.session.add(token)
+    db.session.commit()
+
+    # Create response with token in JSON
+    response = jsonify({"token": token_value, "user_id": user.id, "username": user.username, "is_admin": True})
+
+    # Set a cookie with the token for use with redirects
+    response.set_cookie('ctf_admin_token', token_value, httponly=True, max_age=86400)  # 24 hours
 
     return response
 
@@ -665,14 +701,34 @@ def admin_panel():
 @app.route("/leaderboard")
 def leaderboard():
     """Get the leaderboard of top users by points"""
-    # Get top 10 users by points
-    top_users = User.query.order_by(User.points.desc()).limit(10).all()
+    # Use a more efficient query with a subquery to count solved challenges
+    from sqlalchemy import func, distinct
 
+    # Get the count of distinct challenges solved by each user
+    solved_challenges_subquery = db.session.query(
+        Submission.user_id,
+        func.count(distinct(Submission.challenge_id)).label('solved_count')
+    ).filter(Submission.is_correct == True).group_by(Submission.user_id).subquery()
+
+    # Join with the User table and order by points
+    leaderboard_query = db.session.query(
+        User,
+        solved_challenges_subquery.c.solved_count
+    ).outerjoin(
+        solved_challenges_subquery,
+        User.id == solved_challenges_subquery.c.user_id
+    ).order_by(User.points.desc(), solved_challenges_subquery.c.solved_count.desc())
+
+    # Get top 10 users
+    top_users = leaderboard_query.limit(10).all()
+
+    # Format the response
     leaderboard_data = [{
         'username': user.username,
         'points': user.points,
-        'solved_challenges': Submission.query.filter_by(user_id=user.id, is_correct=True).count()
-    } for user in top_users]
+        'solved_challenges': solved_count if solved_count is not None else 0,
+        'rank': index + 1  # Add rank based on position
+    } for index, (user, solved_count) in enumerate(top_users)]
 
     return jsonify(leaderboard_data)
 
@@ -703,9 +759,31 @@ def user_profile():
     # Get recent submissions
     recent_submissions = Submission.query.filter_by(user_id=user.id).order_by(Submission.submitted_at.desc()).limit(5).all()
 
+    # Get user's rank
+    from sqlalchemy import func, distinct
+
+    # Count users with more points than the current user
+    rank_query = db.session.query(func.count(User.id) + 1).filter(User.points > user.points)
+    user_rank = rank_query.scalar()
+
+    # If there are users with the same points, use solved challenges as a tiebreaker
+    if user_rank == 1:
+        # Check if there are other users with the same points
+        same_points_users = User.query.filter(User.points == user.points, User.id != user.id).all()
+        if same_points_users:
+            # Count solved challenges for current user
+            user_solved_count = Submission.query.filter_by(user_id=user.id, is_correct=True).distinct(Submission.challenge_id).count()
+
+            # Count users with same points but more solved challenges
+            for other_user in same_points_users:
+                other_solved_count = Submission.query.filter_by(user_id=other_user.id, is_correct=True).distinct(Submission.challenge_id).count()
+                if other_solved_count > user_solved_count:
+                    user_rank += 1
+
     return jsonify({
         'username': user.username,
         'points': user.points,
+        'rank': user_rank,
         'solved_challenges': [{
             'id': challenge.challenge_id,
             'name': challenge.name,
@@ -731,8 +809,28 @@ def admin_users():
     if not user or not user.is_admin:
         return jsonify({"error": "Unauthorized"}), 401
 
-    users = User.query.all()
+    # Use a more efficient query with a subquery to count solved challenges
+    from sqlalchemy import func, distinct
 
+    # Get the count of distinct challenges solved by each user
+    solved_challenges_subquery = db.session.query(
+        Submission.user_id,
+        func.count(distinct(Submission.challenge_id)).label('solved_count')
+    ).filter(Submission.is_correct == True).group_by(Submission.user_id).subquery()
+
+    # Join with the User table and order by points
+    users_query = db.session.query(
+        User,
+        solved_challenges_subquery.c.solved_count
+    ).outerjoin(
+        solved_challenges_subquery,
+        User.id == solved_challenges_subquery.c.user_id
+    ).order_by(User.points.desc(), solved_challenges_subquery.c.solved_count.desc())
+
+    # Get all users
+    users_with_counts = users_query.all()
+
+    # Format the response with ranks
     user_data = [{
         'id': u.id,
         'username': u.username,
@@ -741,8 +839,9 @@ def admin_users():
         'created_at': u.created_at.strftime('%Y-%m-%d %H:%M:%S'),
         'last_login': u.last_login.strftime('%Y-%m-%d %H:%M:%S') if u.last_login else None,
         'is_admin': u.is_admin,
-        'solved_challenges': Submission.query.filter_by(user_id=u.id, is_correct=True).count()
-    } for u in users]
+        'solved_challenges': solved_count if solved_count is not None else 0,
+        'rank': index + 1  # Add rank based on position
+    } for index, (u, solved_count) in enumerate(users_with_counts)]
 
     return jsonify(user_data)
 
@@ -1509,6 +1608,12 @@ def init_challenges():
             print("Challenges initialized in the database.")
 
 if __name__ == "__main__":
+    # Parse command line arguments
+    import argparse
+    parser = argparse.ArgumentParser(description='CTF Platform')
+    parser.add_argument('--port', type=int, default=5002, help='Port to run the server on')
+    args = parser.parse_args()
+
     # Clean up any stale containers from previous runs
     cleanup_stale_containers()
 
@@ -1516,6 +1621,21 @@ if __name__ == "__main__":
     with app.app_context():
         db.create_all()
         print("Database tables created.")
+
+        # Create admin user if it doesn't exist
+        admin_user = User.query.filter_by(username="admin").first()
+        if not admin_user:
+            print("Creating admin user...")
+            admin_user = User(username="admin", email="admin@ctf.local", is_admin=True)
+            admin_user.set_password("adminctf2023")
+            db.session.add(admin_user)
+            db.session.commit()
+            print("Admin user created successfully.")
+        elif not admin_user.is_admin:
+            print("Updating existing admin user to have admin privileges...")
+            admin_user.is_admin = True
+            db.session.commit()
+            print("Admin user updated successfully.")
 
     # Initialize challenges
     init_challenges()
@@ -1525,6 +1645,7 @@ if __name__ == "__main__":
 
     # Start the Flask application
     print(f"Challenge timeout set to {CHALLENGE_TIMEOUT} seconds ({CHALLENGE_TIMEOUT/60} minutes)")
-    # Use a different port if in debug mode
-    port = 5001 if os.environ.get('FLASK_DEBUG') else 5002
+    # Use the port from command line arguments or default
+    port = args.port
+    print(f"Starting server on port {port}")
     app.run(host="0.0.0.0", port=port, debug=bool(os.environ.get('FLASK_DEBUG')))

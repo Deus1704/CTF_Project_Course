@@ -40,7 +40,7 @@ python app.py
 
 ## Default Credentials
 
-- **Admin User**: admin@example.com / admin123
+- **Admin User**: admin / adminctf2023
 - **Test User**: user@example.com / user123
 
 ## Creating Your First Challenge

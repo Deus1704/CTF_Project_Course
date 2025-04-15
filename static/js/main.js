@@ -120,9 +120,14 @@ document.addEventListener('DOMContentLoaded', function() {
         showLeaderboardBtn.addEventListener('click', function() {
             // Hide other sections
             if (userProfileSection) userProfileSection.classList.add('hidden');
-            if (challengeList) challengeList.parentElement.classList.add('hidden');
+
+            // Hide challenge list and header
+            if (challengeList) challengeList.classList.add('hidden');
+            const challengesHeader = document.querySelector('.challenges-header');
+            if (challengesHeader) challengesHeader.classList.add('hidden');
 
             // Show leaderboard section
+            const leaderboardSection = document.getElementById('leaderboard-section');
             if (leaderboardSection) {
                 leaderboardSection.classList.remove('hidden');
                 loadLeaderboard();
@@ -722,73 +727,172 @@ document.addEventListener('DOMContentLoaded', function() {
     // Function to load leaderboard just to get user rank
     async function loadLeaderboardForRank() {
         try {
-            const response = await fetch('/leaderboard');
-            const leaderboardData = await response.json();
-
-            // Find user's rank
-            const userRank = leaderboardData.findIndex(user => user.username === userData.username) + 1;
+            // Get user's rank from profile
+            const response = await fetch('/user/profile', {
+                headers: {
+                    'Authorization': userData.token
+                }
+            });
+            const profileData = await response.json();
 
             // Update rank display
             const rankDisplay = document.getElementById('user-rank');
             if (rankDisplay) {
-                if (userRank > 0) {
-                    rankDisplay.textContent = `#${userRank}`;
+                if (profileData.rank) {
+                    rankDisplay.textContent = `#${profileData.rank}`;
                 } else {
                     rankDisplay.textContent = 'N/A';
                 }
             }
         } catch (error) {
-            console.error('Error loading leaderboard for rank:', error);
+            console.error('Error loading user rank:', error);
         }
     }
 
     // Function to load leaderboard
     async function loadLeaderboard() {
         try {
+            // Show loading state
+            const leaderboardSection = document.getElementById('leaderboard-section');
+            if (leaderboardSection) {
+                leaderboardSection.innerHTML = `
+                    <div class="leaderboard-container">
+                        <div class="leaderboard-header">
+                            <h2>Leaderboard</h2>
+                            <button id="back-to-challenges" class="btn-secondary">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <line x1="19" y1="12" x2="5" y2="12"></line>
+                                    <polyline points="12 19 5 12 12 5"></polyline>
+                                </svg>
+                                Back to Challenges
+                            </button>
+                        </div>
+                        <div class="loading-state">
+                            <div class="loading-spinner"></div>
+                            <p>Loading leaderboard data...</p>
+                        </div>
+                    </div>
+                `;
+
+                // Add event listener to the back button
+                const backButton = document.getElementById('back-to-challenges');
+                if (backButton) {
+                    backButton.addEventListener('click', function() {
+                        // Hide leaderboard
+                        leaderboardSection.classList.add('hidden');
+
+                        // Show challenge list and header
+                        const challengeList = document.getElementById('challenge-list');
+                        if (challengeList) challengeList.classList.remove('hidden');
+
+                        const challengesHeader = document.querySelector('.challenges-header');
+                        if (challengesHeader) challengesHeader.classList.remove('hidden');
+                    });
+                }
+            }
+
+            // Fetch leaderboard data
             const response = await fetch('/leaderboard');
             const leaderboardData = await response.json();
 
-            const leaderboardContainer = document.getElementById('leaderboard');
-            if (leaderboardContainer) {
-                leaderboardContainer.innerHTML = '<h3>Leaderboard</h3>';
-
-                if (leaderboardData.length === 0) {
-                    leaderboardContainer.innerHTML += '<p>No entries yet. Be the first to solve a challenge!</p>';
-                    return;
-                }
-
-                const table = document.createElement('table');
-                table.className = 'leaderboard-table';
-                table.innerHTML = `
-                    <thead>
-                        <tr>
-                            <th>Rank</th>
-                            <th>Username</th>
-                            <th>Points</th>
-                            <th>Solved</th>
-                        </tr>
-                    </thead>
-                    <tbody></tbody>
+            // Update the leaderboard section with the data
+            if (leaderboardSection) {
+                leaderboardSection.innerHTML = `
+                    <div class="leaderboard-container">
+                        <div class="leaderboard-header">
+                            <h2>Leaderboard</h2>
+                            <button id="leaderboard-back-btn" class="btn-secondary">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <line x1="19" y1="12" x2="5" y2="12"></line>
+                                    <polyline points="12 19 5 12 12 5"></polyline>
+                                </svg>
+                                Back to Challenges
+                            </button>
+                        </div>
+                        <div class="leaderboard-content">
+                            <table class="leaderboard-table">
+                                <thead>
+                                    <tr>
+                                        <th>Rank</th>
+                                        <th>Username</th>
+                                        <th>Points</th>
+                                        <th>Challenges Solved</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${leaderboardData.length > 0 ?
+                                        leaderboardData.map(user => `
+                                            <tr class="${user.username === userData.username ? 'current-user' : ''}">
+                                                <td>${user.rank}</td>
+                                                <td>${user.username}</td>
+                                                <td>${user.points}</td>
+                                                <td>${user.solved_challenges}</td>
+                                            </tr>
+                                        `).join('') :
+                                        '<tr><td colspan="4">No users found</td></tr>'
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
                 `;
 
-                const tbody = table.querySelector('tbody');
+                // Re-add event listener to the back button
+                const backButton = document.getElementById('leaderboard-back-btn');
+                if (backButton) {
+                    backButton.addEventListener('click', function() {
+                        // Hide leaderboard
+                        leaderboardSection.classList.add('hidden');
 
-                leaderboardData.forEach((user, index) => {
-                    const row = document.createElement('tr');
-                    row.className = user.username === userData.username ? 'current-user' : '';
-                    row.innerHTML = `
-                        <td>${index + 1}</td>
-                        <td>${user.username}</td>
-                        <td>${user.points}</td>
-                        <td>${user.solved_challenges}</td>
-                    `;
-                    tbody.appendChild(row);
-                });
+                        // Show challenge list and header
+                        const challengeList = document.getElementById('challenge-list');
+                        if (challengeList) challengeList.classList.remove('hidden');
 
-                leaderboardContainer.appendChild(table);
+                        const challengesHeader = document.querySelector('.challenges-header');
+                        if (challengesHeader) challengesHeader.classList.remove('hidden');
+                    });
+                }
             }
         } catch (error) {
             console.error('Error loading leaderboard:', error);
+
+            // Show error state
+            const leaderboardSection = document.getElementById('leaderboard-section');
+            if (leaderboardSection) {
+                leaderboardSection.innerHTML = `
+                    <div class="leaderboard-container">
+                        <div class="leaderboard-header">
+                            <h2>Leaderboard</h2>
+                            <button id="leaderboard-error-back-btn" class="btn-secondary">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <line x1="19" y1="12" x2="5" y2="12"></line>
+                                    <polyline points="12 19 5 12 12 5"></polyline>
+                                </svg>
+                                Back to Challenges
+                            </button>
+                        </div>
+                        <div class="error-state">
+                            <p>Error loading leaderboard data. Please try again later.</p>
+                        </div>
+                    </div>
+                `;
+
+                // Add event listener to the back button
+                const backButton = document.getElementById('leaderboard-error-back-btn');
+                if (backButton) {
+                    backButton.addEventListener('click', function() {
+                        // Hide leaderboard
+                        leaderboardSection.classList.add('hidden');
+
+                        // Show challenge list and header
+                        const challengeList = document.getElementById('challenge-list');
+                        if (challengeList) challengeList.classList.remove('hidden');
+
+                        const challengesHeader = document.querySelector('.challenges-header');
+                        if (challengesHeader) challengesHeader.classList.remove('hidden');
+                    });
+                }
+            }
         }
     }
 
