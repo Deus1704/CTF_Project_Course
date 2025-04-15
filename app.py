@@ -91,7 +91,7 @@ class ChallengeLoader:
                 print(f"Failed to create Dockerfile at {dockerfile_path}")
 
         # Build Docker image with a user-specific tag
-        image_tag = f"ctf_{self.challenge_id}_{user_id}"
+        image_tag = f"ctf_{self.challenge_id}_{user_id}".lower()
         print(f"Building Docker image {image_tag}")
         result = subprocess.run([
             "docker", "build", "-t",

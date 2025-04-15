@@ -849,6 +849,22 @@ document.addEventListener('DOMContentLoaded', function() {
             const response = await fetch('/challenges');
             const challengesData = await response.json();
 
+            // Fetch user's solved challenges
+            const userProfileResponse = await fetch('/user/profile', {
+                headers: {
+                    'Authorization': userData.token
+                }
+            });
+            const userProfile = await userProfileResponse.json();
+
+            // Create a set of solved challenge IDs for quick lookup
+            const solvedChallengeIds = new Set();
+            if (userProfile.solved_challenges && userProfile.solved_challenges.length > 0) {
+                userProfile.solved_challenges.forEach(challenge => {
+                    solvedChallengeIds.add(challenge.id);
+                });
+            }
+
             // Process challenges based on response format
             let challenges = [];
 
@@ -872,7 +888,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         description: challengeDescriptions[id] || 'A CTF challenge',
                         category: id.split('-')[0] || 'misc',
                         difficulty: 'medium',
-                        points: 100
+                        points: 100,
+                        solved: solvedChallengeIds.has(id)
                     }));
                 } else {
                     // We have full challenge objects
@@ -882,7 +899,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         description: challenge.description,
                         category: challenge.category,
                         difficulty: challenge.difficulty,
-                        points: challenge.points
+                        points: challenge.points,
+                        solved: solvedChallengeIds.has(challenge.id)
                     }));
                 }
             }
@@ -920,15 +938,21 @@ document.addEventListener('DOMContentLoaded', function() {
                     // Add challenges for this category
                     categorizedChallenges[category].forEach(challenge => {
                         const challengeCard = document.createElement('div');
-                        challengeCard.className = `challenge-card difficulty-${challenge.difficulty}`;
+                        challengeCard.className = `challenge-card difficulty-${challenge.difficulty} ${challenge.solved ? 'solved' : ''}`;
+                        challengeCard.setAttribute('data-id', challenge.id);
+
+                        // Create the HTML content with solved status
                         challengeCard.innerHTML = `
                             <div class="challenge-header">
                                 <h3>${challenge.name}</h3>
                                 <span class="challenge-points">${challenge.points} pts</span>
                             </div>
                             <div class="challenge-difficulty">${challenge.difficulty}</div>
+                            ${challenge.solved ? '<span class="status-badge solved">SOLVED</span>' : ''}
                             <p>${challenge.description}</p>
-                            <button class="start-challenge-btn" data-id="${challenge.id}">Start Challenge</button>
+                            <button class="start-challenge-btn" data-id="${challenge.id}">
+                                ${challenge.solved ? 'View Challenge' : 'Start Challenge'}
+                            </button>
                         `;
                         categoryContainer.appendChild(challengeCard);
 
