@@ -25,30 +25,36 @@ def verify_access():
         token = request.cookies.get('ctf_token')
     elif request.headers.get('Authorization'):
         token = request.headers.get('Authorization')
-    
+
     # If no token is provided, check if this is the user who started the challenge
     if not token and USER_TOKEN:
         # For direct access, we'll use the token that was used to start the challenge
         token = USER_TOKEN
-    
+
     # If still no token, deny access
     if not token:
         return False
-    
+
     # Verify token with main site
     try:
-        # Make a request to the main site to verify the token
-        response = requests.get(
+        # Make a request to the main site to verify the token and container ownership
+        response = requests.post(
             f"{MAIN_SITE}verify-token",
-            headers={"Authorization": token}
+            json={
+                'token': token,
+                'user_id': USER_ID,
+                'container_id': CONTAINER_ID,
+                'challenge_id': CHALLENGE_ID
+            }
         )
-        
+
         if response.status_code == 200:
             data = response.json()
             # Check if this is the user who started the challenge
-            if data.get('username') == USER_ID:
+            if data.get('valid') and data.get('username') == USER_ID:
                 return True
-        
+            print(f"Token verification failed: {data}")
+
         return False
     except Exception as e:
         print(f"Error verifying token: {e}")
@@ -61,14 +67,55 @@ def check_auth():
     # Skip auth check for the verification endpoint itself
     if request.path == '/verify-access':
         return
-    
+
     # Verify access for all other routes
     if not verify_access():
         # Return a JSON response for API requests
         if request.path.startswith('/api/') or request.headers.get('Accept') == 'application/json':
             return jsonify({"error": "Unauthorized access. This challenge was started by another user."}), 403
-        
-        # Return an HTML error page for regular requests
+
+        # Get token from cookie or Authorization header
+        token = None
+        if request.cookies.get('ctf_token'):
+            token = request.cookies.get('ctf_token')
+        elif request.headers.get('Authorization'):
+            token = request.headers.get('Authorization')
+
+        # If no token at all, redirect to login page
+        if not token:
+            return render_template_string("""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Authentication Required</title>
+                <meta http-equiv="refresh" content="3;url={{ login_url }}" />
+                <style>
+                    body { font-family: Arial, sans-serif; margin: 40px; text-align: center; }
+                    h1 { color: #f0ad4e; }
+                    .container { max-width: 600px; margin: 0 auto; }
+                    .btn { display: inline-block; padding: 10px 15px; background-color: #007bff;
+                           color: white; text-decoration: none; border-radius: 4px; margin-top: 20px; }
+                    .message { margin-top: 20px; color: #6c757d; }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <h1>Authentication Required</h1>
+                    <p>You need to log in to access this challenge.</p>
+                    <p>Redirecting to login page...</p>
+                    <div class="message">If you are not redirected automatically, <a href="{{ login_url }}">click here</a>.</div>
+                </div>
+                <script>
+                    // Ensure we redirect even if meta refresh fails
+                    setTimeout(function() {
+                        window.location.href = "{{ login_url }}";
+                    }, 3000);
+                </script>
+            </body>
+            </html>
+            """, login_url=f"{MAIN_SITE}login.html"), 401
+
+        # If token exists but is invalid (wrong user), show access denied
         return render_template_string("""
         <!DOCTYPE html>
         <html>
@@ -78,7 +125,7 @@ def check_auth():
                 body { font-family: Arial, sans-serif; margin: 40px; text-align: center; }
                 h1 { color: #d9534f; }
                 .container { max-width: 600px; margin: 0 auto; }
-                .btn { display: inline-block; padding: 10px 15px; background-color: #007bff; 
+                .btn { display: inline-block; padding: 10px 15px; background-color: #007bff;
                        color: white; text-decoration: none; border-radius: 4px; margin-top: 20px; }
             </style>
         </head>

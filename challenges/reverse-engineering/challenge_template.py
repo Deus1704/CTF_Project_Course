@@ -37,17 +37,23 @@ def verify_access():
 
     # Verify token with main site
     try:
-        # Make a request to the main site to verify the token
-        response = requests.get(
+        # Make a request to the main site to verify the token and container ownership
+        response = requests.post(
             f"{MAIN_SITE}verify-token",
-            headers={"Authorization": token}
+            json={
+                'token': token,
+                'user_id': USER_ID,
+                'container_id': CONTAINER_ID,
+                'challenge_id': CHALLENGE_ID
+            }
         )
 
         if response.status_code == 200:
             data = response.json()
             # Check if this is the user who started the challenge
-            if data.get('username') == USER_ID:
+            if data.get('valid') and data.get('username') == USER_ID:
                 return True
+            print(f"Token verification failed: {data}")
 
         return False
     except Exception as e:

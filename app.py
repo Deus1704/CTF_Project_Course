@@ -227,6 +227,12 @@ class ChallengeLoader:
             user_token = ''
             if hasattr(request, 'headers') and request.headers.get('Authorization'):
                 user_token = request.headers.get('Authorization')
+            elif request.cookies.get('ctf_token'):
+                user_token = request.cookies.get('ctf_token')
+
+            # If no token, this is a security issue - we shouldn't start a container without authentication
+            if not user_token:
+                print("WARNING: No user token found when starting container. This is a security risk.")
 
             # Run the container first
             container_id = subprocess.check_output([
@@ -1359,15 +1365,42 @@ def host_info():
         "host_url": f"http://{HOST_IP}:{host_port}/"
     })
 
-@app.route("/verify-token")
+@app.route("/verify-token", methods=["GET", "POST"])
 def verify_token_endpoint():
-    """Verify a token and return user information"""
-    token_value = request.headers.get("Authorization")
+    """Verify a token and check container ownership"""
+    # Handle both GET and POST requests
+    if request.method == "GET":
+        # Get token from Authorization header
+        token_value = request.headers.get("Authorization")
+        if not token_value:
+            return jsonify({"valid": False, "error": "No token provided"}), 401
+    else:  # POST
+        # Get data from request body
+        data = request.json
+        token_value = data.get("token")
+        container_id = data.get("container_id")
+        challenge_id = data.get("challenge_id")
+        user_id = data.get("user_id")
+
+        if not token_value:
+            return jsonify({"valid": False, "error": "No token provided"}), 401
+
+    # Verify the token
     user = verify_token(token_value)
-
     if not user:
-        return jsonify({"error": "Invalid or expired token"}), 401
+        return jsonify({"valid": False, "error": "Invalid or expired token"}), 401
 
+    # If container_id is provided, verify container ownership
+    if request.method == "POST" and container_id and container_id in active_containers:
+        container_info = active_containers.get(container_id)
+        if container_info.get("user") != user.username:
+            return jsonify({
+                "valid": False,
+                "error": "Container not owned by this user",
+                "username": user.username
+            }), 403
+
+    # Token is valid and container ownership verified (if applicable)
     return jsonify({
         "valid": True,
         "user_id": user.id,
@@ -1382,7 +1415,11 @@ def submit_flag_main():
     flag = data.get("flag")
     challenge_id = data.get("challenge_id")
     container_id = data.get("container_id")
+
+    # Get token from Authorization header or cookie
     token_value = request.headers.get("Authorization")
+    if not token_value and request.cookies.get('ctf_token'):
+        token_value = request.cookies.get('ctf_token')
 
     if not flag or not challenge_id:
         return jsonify({"error": "Flag and challenge ID are required"}), 400
@@ -1390,7 +1427,7 @@ def submit_flag_main():
     # Verify user token
     user = verify_token(token_value)
     if not user:
-        return jsonify({"error": "Unauthorized"}), 401
+        return jsonify({"error": "Unauthorized - invalid or expired token"}), 401
 
     # Get the challenge
     challenge = Challenge.query.filter_by(challenge_id=challenge_id).first()
@@ -1405,6 +1442,12 @@ def submit_flag_main():
                 "success": False,
                 "message": "You cannot submit a flag for a challenge started by another user."
             }), 403
+    elif container_id:
+        # Container ID was provided but not found in active containers
+        return jsonify({
+            "success": False,
+            "message": "The challenge instance is no longer active. Please start a new instance."
+        }), 400
 
     # Generate the expected flag
     expected_flag = generate_flag(user.username, challenge_id)
