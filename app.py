@@ -6,6 +6,7 @@ import subprocess
 import threading
 import secrets
 import time
+import socket
 from datetime import datetime, timedelta
 from werkzeug.security import generate_password_hash, check_password_hash
 from models import db, User, Challenge, Submission, Hint, Achievement, Token
@@ -28,12 +29,32 @@ CHALLENGE_TIMEOUT = 300
 # Challenge base directory
 CHALLENGE_BASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "challenges")
 
+# Function to get the host IP address
+def get_host_ip():
+    try:
+        # Create a socket to connect to an external server
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        # Doesn't need to be reachable, just to determine the interface
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception as e:
+        print(f"Error getting host IP: {e}")
+        return "localhost"
+
+# Get the host IP address
+HOST_IP = get_host_ip()
+print(f"Host IP address: {HOST_IP}")
+
 # Docker template for challenges
 DOCKER_TEMPLATE = """
 FROM python:3.9-slim
 WORKDIR /app
-RUN pip install flask
+RUN pip install flask requests
 COPY . .
+# Use the secure challenge template if challenge.py doesn't exist
+RUN if [ ! -f challenge.py ]; then cp /app/challenge_template.py /app/challenge.py; fi
 CMD ["python", "challenge.py"]
 """
 
@@ -198,8 +219,14 @@ class ChallengeLoader:
             # Pass the flag as an environment variable to the container
             print(f"[DEBUG] Running Docker container with command: docker run -d -p {port}:5000 -e CTF_FLAG={flag} {image_tag}")
 
-            # Get the host URL
-            host_url = request.host_url if hasattr(request, 'host_url') else f"http://localhost:5002"
+            # Get the host URL using the actual host IP instead of localhost
+            host_port = request.host.split(':')[-1] if ':' in request.host else "5002"
+            host_url = f"http://{HOST_IP}:{host_port}/"
+
+            # Get user token if available
+            user_token = ''
+            if hasattr(request, 'headers') and request.headers.get('Authorization'):
+                user_token = request.headers.get('Authorization')
 
             # Run the container first
             container_id = subprocess.check_output([
@@ -210,6 +237,8 @@ class ChallengeLoader:
                 "-e", f"CTF_FLAG={flag}",  # Flag environment variable
                 "-e", f"MAIN_SITE={host_url}",  # Main site URL for redirect
                 "-e", f"CHALLENGE_ID={self.challenge_id}",  # Challenge ID
+                "-e", f"USER_TOKEN={user_token}",  # User token for authentication
+                "-e", f"USER_ID={user_id}",  # User ID for verification
                 "--memory", "256m",  # Memory limit
                 "--cpus", "0.5",  # CPU limit
                 image_tag
@@ -401,8 +430,9 @@ def start_challenge(challenge_id):
                             is_correct=True
                         ).first()
 
-                        # Get the main site URL for redirection
-                        main_site = request.host_url
+                        # Get the main site URL for redirection using the actual host IP
+                        host_port = request.host.split(':')[-1] if ':' in request.host else "5002"
+                        main_site = f"http://{HOST_IP}:{host_port}/"
 
                         # Include solved status in response
                         return jsonify({
@@ -416,8 +446,9 @@ def start_challenge(challenge_id):
                             "main_site": main_site
                         })
                     else:
-                        # Get the main site URL for redirection
-                        main_site = request.host_url
+                        # Get the main site URL for redirection using the actual host IP
+                        host_port = request.host.split(':')[-1] if ':' in request.host else "5002"
+                        main_site = f"http://{HOST_IP}:{host_port}/"
 
                         return jsonify({
                             "message": "Challenge already running",
@@ -444,8 +475,9 @@ def start_challenge(challenge_id):
     port, container_id = loader.run_container(user_id, flag)
     print(f"Container started on port {port} with ID {container_id}")
 
-    # Get the main site URL for redirection
-    main_site = request.host_url
+    # Get the main site URL for redirection using the actual host IP
+    host_port = request.host.split(':')[-1] if ':' in request.host else "5002"
+    main_site = f"http://{HOST_IP}:{host_port}/"
 
     return jsonify({
         "message": "Challenge started",
@@ -562,135 +594,157 @@ def index():
         'container_id': container_id,
         'auto_show': auto_show,
         'points_earned': 0,
-        'challenge_name': ''
+        'challenge_name': '',
+        'host_ip': HOST_IP  # Pass the host IP to the template
     }
 
     # If flag was successfully submitted from a challenge container
     if flag_success and challenge_id:
         # Get the user from the session cookie if available
         session_token = request.cookies.get('ctf_token')
-        if session_token:
-            user = verify_token(session_token)
-            if user:
-                # Get the challenge
-                challenge = Challenge.query.filter_by(challenge_id=challenge_id).first()
-                if challenge:
-                    context['challenge_name'] = challenge.name
+        auth_header = request.headers.get('Authorization')
 
-                    # Check if this is the first correct submission for this challenge
-                    previous_correct = Submission.query.filter_by(
-                        user_id=user.id,
-                        challenge_id=challenge.id,
-                        is_correct=True
-                    ).first()
+        # Try to get token from cookie or header
+        token = session_token or auth_header
 
-                    if not previous_correct:
-                        # Record the submission
-                        submission = Submission(
-                            user_id=user.id,
-                            challenge_id=challenge.id,
-                            flag=generate_flag(user.username, challenge_id),  # We don't have the actual flag, but we can regenerate it
-                            is_correct=True,
-                            points_awarded=challenge.points
-                        )
-                        db.session.add(submission)
+        # If no token, redirect to login page
+        if not token:
+            return redirect('/login.html')
 
-                        # Award points to the user
-                        user.points += challenge.points
-                        db.session.commit()
+        # Verify the token
+        user = verify_token(token)
+        if not user:
+            # Invalid token, redirect to login
+            return redirect('/login.html')
 
-                        # Add points to context
-                        context['points_earned'] = challenge.points
+        # Verify that this user is the one who started the challenge
+        if container_id and container_id in active_containers:
+            container_info = active_containers.get(container_id)
+            if container_info.get('user') != user.username:
+                # This user didn't start this challenge
+                flash("You cannot claim points for a challenge started by another user.", "error")
+                return render_template('index.html', title="CTF Platform", host_ip=HOST_IP)
 
-                        # Set a flash message
-                        flash(f"Congratulations! You earned {challenge.points} points for solving {challenge.name}!", "success")
-                    else:
-                        # Even if already solved, we need to show the points that were earned
-                        previous_submission = Submission.query.filter_by(
-                            user_id=user.id,
-                            challenge_id=challenge.id,
-                            is_correct=True
-                        ).first()
+        # User is authenticated and verified
+        # Get the challenge
+        challenge = Challenge.query.filter_by(challenge_id=challenge_id).first()
+        if challenge:
+            context['challenge_name'] = challenge.name
 
-                        if previous_submission:
-                            context['points_earned'] = previous_submission.points_awarded
-                        else:
-                            context['points_earned'] = challenge.points
+            # Check if this is the first correct submission for this challenge
+            previous_correct = Submission.query.filter_by(
+                user_id=user.id,
+                challenge_id=challenge.id,
+                is_correct=True
+            ).first()
 
-                        flash("You've already solved this challenge!", "info")
+            if not previous_correct:
+                # Record the submission
+                submission = Submission(
+                    user_id=user.id,
+                    challenge_id=challenge.id,
+                    flag=generate_flag(user.username, challenge_id),  # We don't have the actual flag, but we can regenerate it
+                    is_correct=True,
+                    points_awarded=challenge.points
+                )
+                db.session.add(submission)
 
-                    # Try to stop the container for this challenge
+                # Award points to the user
+                user.points += challenge.points
+                db.session.commit()
+
+                # Add points to context
+                context['points_earned'] = challenge.points
+
+                # Set a flash message
+                flash(f"Congratulations! You earned {challenge.points} points for solving {challenge.name}!", "success")
+            else:
+                # Even if already solved, we need to show the points that were earned
+                previous_submission = Submission.query.filter_by(
+                    user_id=user.id,
+                    challenge_id=challenge.id,
+                    is_correct=True
+                ).first()
+
+                if previous_submission:
+                    context['points_earned'] = previous_submission.points_awarded
+                else:
+                    context['points_earned'] = challenge.points
+
+                flash("You've already solved this challenge!", "info")
+
+            # Try to stop the container for this challenge
+            try:
+                # If container_id is provided in the URL, use it
+                if container_id:
+                    # Stop and remove the container - use check_call for synchronous execution
+                    print(f"Stopping container {container_id} after successful flag submission")
                     try:
-                        # If container_id is provided in the URL, use it
-                        if container_id:
-                            # Stop and remove the container - use check_call for synchronous execution
+                        # Force stop and remove the container
+                        subprocess.check_call(["docker", "stop", container_id])
+                        subprocess.check_call(["docker", "rm", "-f", container_id])
+                        print(f"Container {container_id} has been stopped and removed")
+
+                        # Remove from active containers
+                        if container_id in active_containers:
+                            active_containers.pop(container_id, None)
+                            print(f"Removed container {container_id} from active containers")
+                    except subprocess.CalledProcessError as e:
+                        print(f"Error stopping container: {e}")
+                        # Try to find the container by name/ID pattern
+                        try:
+                            # Get all containers for this challenge and user
+                            result = subprocess.check_output(["docker", "ps", "-q", "--filter", f"name={challenge_id}-{user.username}"], text=True)
+                            container_ids = result.strip().split('\n')
+                            for c_id in container_ids:
+                                if c_id:
+                                    print(f"Found container {c_id} for challenge {challenge_id}, stopping it")
+                                    subprocess.call(["docker", "stop", c_id])
+                                    subprocess.call(["docker", "rm", "-f", c_id])
+                        except Exception as inner_e:
+                            print(f"Error finding containers by pattern: {inner_e}")
+                else:
+                    # Find the container for this user and challenge
+                    found = False
+                    for c_id, info in list(active_containers.items()):
+                        if info.get('challenge') == challenge_id and info.get('user') == user.username:
+                            container_id = c_id
+                            context['container_id'] = container_id
+                            found = True
+
+                            # Stop and remove the container
                             print(f"Stopping container {container_id} after successful flag submission")
                             try:
-                                # Force stop and remove the container
                                 subprocess.check_call(["docker", "stop", container_id])
                                 subprocess.check_call(["docker", "rm", "-f", container_id])
                                 print(f"Container {container_id} has been stopped and removed")
-
-                                # Remove from active containers
-                                if container_id in active_containers:
-                                    active_containers.pop(container_id, None)
-                                    print(f"Removed container {container_id} from active containers")
                             except subprocess.CalledProcessError as e:
                                 print(f"Error stopping container: {e}")
-                                # Try to find the container by name/ID pattern
-                                try:
-                                    # Get all containers for this challenge and user
-                                    result = subprocess.check_output(["docker", "ps", "-q", "--filter", f"name={challenge_id}-{user.username}"], text=True)
-                                    container_ids = result.strip().split('\n')
-                                    for c_id in container_ids:
-                                        if c_id:
-                                            print(f"Found container {c_id} for challenge {challenge_id}, stopping it")
-                                            subprocess.call(["docker", "stop", c_id])
-                                            subprocess.call(["docker", "rm", "-f", c_id])
-                                except Exception as inner_e:
-                                    print(f"Error finding containers by pattern: {inner_e}")
-                        else:
-                            # Find the container for this user and challenge
-                            found = False
-                            for c_id, info in list(active_containers.items()):
-                                if info.get('challenge') == challenge_id and info.get('user') == user.username:
-                                    container_id = c_id
-                                    context['container_id'] = container_id
-                                    found = True
 
-                                    # Stop and remove the container
-                                    print(f"Stopping container {container_id} after successful flag submission")
-                                    try:
-                                        subprocess.check_call(["docker", "stop", container_id])
-                                        subprocess.check_call(["docker", "rm", "-f", container_id])
-                                        print(f"Container {container_id} has been stopped and removed")
-                                    except subprocess.CalledProcessError as e:
-                                        print(f"Error stopping container: {e}")
+                            # Remove from active containers
+                            active_containers.pop(container_id, None)
+                            print(f"Removed container {container_id} from active containers")
+                            break
 
-                                    # Remove from active containers
-                                    active_containers.pop(container_id, None)
-                                    print(f"Removed container {container_id} from active containers")
-                                    break
+                    # If not found in active_containers, try to find by pattern
+                    if not found:
+                        try:
+                            # Get all containers for this challenge and user
+                            result = subprocess.check_output(["docker", "ps", "-q", "--filter", f"name={challenge_id}-{user.username}"], text=True)
+                            container_ids = result.strip().split('\n')
+                            for c_id in container_ids:
+                                if c_id:
+                                    print(f"Found container {c_id} for challenge {challenge_id}, stopping it")
+                                    subprocess.call(["docker", "stop", c_id])
+                                    subprocess.call(["docker", "rm", "-f", c_id])
+                        except Exception as inner_e:
+                            print(f"Error finding containers by pattern: {inner_e}")
+            except Exception as e:
+                print(f"Error stopping container: {e}")
 
-                            # If not found in active_containers, try to find by pattern
-                            if not found:
-                                try:
-                                    # Get all containers for this challenge and user
-                                    result = subprocess.check_output(["docker", "ps", "-q", "--filter", f"name={challenge_id}-{user.username}"], text=True)
-                                    container_ids = result.strip().split('\n')
-                                    for c_id in container_ids:
-                                        if c_id:
-                                            print(f"Found container {c_id} for challenge {challenge_id}, stopping it")
-                                            subprocess.call(["docker", "stop", c_id])
-                                            subprocess.call(["docker", "rm", "-f", c_id])
-                                except Exception as inner_e:
-                                    print(f"Error finding containers by pattern: {inner_e}")
-                    except Exception as e:
-                        print(f"Error stopping container: {e}")
-
-                    # Set a flag to show the celebration effect
-                    context['show_celebration'] = True
-                    context['challenge_solved'] = True
+            # Set a flag to show the celebration effect
+            context['show_celebration'] = True
+            context['challenge_solved'] = True
 
     return render_template('index.html', **context)
 
@@ -1295,12 +1349,39 @@ if __name__ == '__main__':
 def test():
     return jsonify({"status": "ok", "message": "Server is running"})
 
+@app.route("/host-info")
+def host_info():
+    """Return host information for network access"""
+    host_port = request.host.split(':')[-1] if ':' in request.host else "5002"
+    return jsonify({
+        "host_ip": HOST_IP,
+        "host_port": host_port,
+        "host_url": f"http://{HOST_IP}:{host_port}/"
+    })
+
+@app.route("/verify-token")
+def verify_token_endpoint():
+    """Verify a token and return user information"""
+    token_value = request.headers.get("Authorization")
+    user = verify_token(token_value)
+
+    if not user:
+        return jsonify({"error": "Invalid or expired token"}), 401
+
+    return jsonify({
+        "valid": True,
+        "user_id": user.id,
+        "username": user.username,
+        "is_admin": user.is_admin
+    })
+
 @app.route("/submit-flag-main", methods=["POST"])
 def submit_flag_main():
     """Submit a flag for a challenge from the main site"""
     data = request.json
     flag = data.get("flag")
     challenge_id = data.get("challenge_id")
+    container_id = data.get("container_id")
     token_value = request.headers.get("Authorization")
 
     if not flag or not challenge_id:
@@ -1315,6 +1396,15 @@ def submit_flag_main():
     challenge = Challenge.query.filter_by(challenge_id=challenge_id).first()
     if not challenge:
         return jsonify({"error": "Challenge not found"}), 404
+
+    # Verify that this user is the one who started the challenge
+    if container_id and container_id in active_containers:
+        container_info = active_containers.get(container_id)
+        if container_info.get('user') != user.username:
+            return jsonify({
+                "success": False,
+                "message": "You cannot submit a flag for a challenge started by another user."
+            }), 403
 
     # Generate the expected flag
     expected_flag = generate_flag(user.username, challenge_id)
@@ -1546,6 +1636,23 @@ def init_challenges():
     """Initialize challenges from the challenges directory"""
     print(f"Challenge base directory: {CHALLENGE_BASE}")
 
+    # Copy the challenge template to the challenges directory
+    template_src = os.path.join(os.path.dirname(os.path.abspath(__file__)), "challenge_template.py")
+    if os.path.exists(template_src):
+        print(f"Copying challenge template to challenges directory")
+        for challenge_dir in os.listdir(CHALLENGE_BASE):
+            challenge_path = os.path.join(CHALLENGE_BASE, challenge_dir)
+            if os.path.isdir(challenge_path) and not challenge_dir.startswith('.'):
+                template_dst = os.path.join(challenge_path, "challenge_template.py")
+                try:
+                    with open(template_src, "r") as src_file, open(template_dst, "w") as dst_file:
+                        dst_file.write(src_file.read())
+                    print(f"Copied template to {challenge_dir}")
+                except Exception as e:
+                    print(f"Error copying template to {challenge_dir}: {e}")
+    else:
+        print(f"Warning: Challenge template not found at {template_src}")
+
     # Check if we need to initialize the database with challenges
     with app.app_context():
         if Challenge.query.count() == 0:
@@ -1648,4 +1755,9 @@ if __name__ == "__main__":
     # Use the port from command line arguments or default
     port = args.port
     print(f"Starting server on port {port}")
-    app.run(host="0.0.0.0", port=port, debug=bool(os.environ.get('FLASK_DEBUG')))
+    print(f"\n===================================================")
+    print(f"CTF Platform is now running!")
+    print(f"Access the platform at: http://{HOST_IP}:{port}")
+    print(f"Share this URL with other users on your network")
+    print(f"===================================================\n")
+    app.run(host="0.0.0.0", port=port)

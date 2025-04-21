@@ -82,6 +82,21 @@ header {
     text-align: center;
 }
 
+.network-info {
+    background-color: #444;
+    padding: 8px 0;
+    margin-top: 10px;
+    font-size: 0.9em;
+}
+
+.network-info strong {
+    color: #4CAF50;
+    font-family: monospace;
+    padding: 3px 6px;
+    background-color: rgba(0, 0, 0, 0.2);
+    border-radius: 3px;
+}
+
 .auth-container {
     background: #fff;
     margin: 20px auto;

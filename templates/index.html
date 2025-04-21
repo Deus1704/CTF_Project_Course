@@ -10,6 +10,9 @@
 <body>
     <header>
         <h1>CTF Challenge Platform</h1>
+        <div class="network-info">
+            <span>Network Access: <strong>http://{{ host_ip }}:{{ request.host.split(':')[-1] }}</strong></span>
+        </div>
     </header>
 
     <div class="container">
