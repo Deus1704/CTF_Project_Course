@@ -10,7 +10,7 @@ let userData = {
 };
 
 // DOM elements
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     // Handle celebration overlay if it exists
     const celebrationOverlay = document.getElementById('celebration-overlay');
     const closeCelebrationBtn = document.getElementById('close-celebration');
@@ -26,7 +26,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // Add event listener to close button
         if (closeCelebrationBtn) {
-            closeCelebrationBtn.addEventListener('click', function() {
+            closeCelebrationBtn.addEventListener('click', function () {
                 celebrationOverlay.style.display = 'none';
 
                 // If we have challenge data, show the challenge dialog
@@ -80,7 +80,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Login form submission
     if (loginForm) {
-        loginForm.addEventListener('submit', function(e) {
+        loginForm.addEventListener('submit', function (e) {
             e.preventDefault();
             const username = document.getElementById('username').value;
             const password = document.getElementById('password').value;
@@ -91,14 +91,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Logout button
     if (logoutBtn) {
-        logoutBtn.addEventListener('click', function() {
+        logoutBtn.addEventListener('click', function () {
             logout();
         });
     }
 
     // Show profile button
     if (showProfileBtn) {
-        showProfileBtn.addEventListener('click', function() {
+        showProfileBtn.addEventListener('click', function () {
             // Hide other sections
             if (leaderboardSection) leaderboardSection.classList.add('hidden');
 
@@ -117,7 +117,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Show leaderboard button
     if (showLeaderboardBtn) {
-        showLeaderboardBtn.addEventListener('click', function() {
+        showLeaderboardBtn.addEventListener('click', function () {
             // Hide other sections
             if (userProfileSection) userProfileSection.classList.add('hidden');
 
@@ -137,14 +137,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Category filter
     if (categoryFilter) {
-        categoryFilter.addEventListener('change', function() {
+        categoryFilter.addEventListener('change', function () {
             filterChallenges();
         });
     }
 
     // Back to challenges button
     if (backToChallengesBtn) {
-        backToChallengesBtn.addEventListener('click', function() {
+        backToChallengesBtn.addEventListener('click', function () {
             // Hide profile section
             if (userProfileSection) userProfileSection.classList.add('hidden');
             if (leaderboardSection) leaderboardSection.classList.add('hidden');
@@ -158,7 +158,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Difficulty filter
     if (difficultyFilter) {
-        difficultyFilter.addEventListener('change', function() {
+        difficultyFilter.addEventListener('change', function () {
             filterChallenges();
         });
     }
@@ -245,7 +245,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // Add close button functionality
         const closeBtn = successMessage.querySelector('.close-success');
-        closeBtn.addEventListener('click', function() {
+        closeBtn.addEventListener('click', function () {
             successMessage.remove();
         });
 
@@ -275,7 +275,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // Add close button functionality
         const closeBtn = infoMessage.querySelector('.close-info');
-        closeBtn.addEventListener('click', function() {
+        closeBtn.addEventListener('click', function () {
             infoMessage.remove();
         });
 
@@ -496,9 +496,9 @@ document.addEventListener('DOMContentLoaded', function() {
                             </div>
                             <span class="submission-status ${submission.is_correct ? 'correct' : 'incorrect'}">
                                 ${submission.is_correct ?
-                                    `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>` :
-                                    `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`
-                                }
+                                `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>` :
+                                `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`
+                            }
                                 ${submission.is_correct ? `+${submission.points_awarded} pts` : ''}
                             </span>
                         `;
@@ -548,9 +548,9 @@ document.addEventListener('DOMContentLoaded', function() {
                             item.innerHTML = `
                                 <div class="achievement-icon">
                                     ${achievement.badge_image ?
-                                        `<img src="${achievement.badge_image}" alt="${achievement.name}">` :
-                                        `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="7"></circle><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"></polyline></svg>`
-                                    }
+                                    `<img src="${achievement.badge_image}" alt="${achievement.name}">` :
+                                    `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="7"></circle><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"></polyline></svg>`
+                                }
                                 </div>
                                 <div class="achievement-info">
                                     <span class="achievement-name">${achievement.name}</span>
@@ -710,7 +710,7 @@ document.addEventListener('DOMContentLoaded', function() {
         // Add event listener to close button
         const closeBtn = document.getElementById('close-solved-challenge');
         if (closeBtn) {
-            closeBtn.addEventListener('click', function() {
+            closeBtn.addEventListener('click', function () {
                 modal.style.display = 'none';
             });
         }
@@ -777,7 +777,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 // Add event listener to the back button
                 const backButton = document.getElementById('back-to-challenges');
                 if (backButton) {
-                    backButton.addEventListener('click', function() {
+                    backButton.addEventListener('click', function () {
                         // Hide leaderboard
                         leaderboardSection.classList.add('hidden');
 
@@ -821,7 +821,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                 </thead>
                                 <tbody>
                                     ${leaderboardData.length > 0 ?
-                                        leaderboardData.map(user => `
+                        leaderboardData.map(user => `
                                             <tr class="${user.username === userData.username ? 'current-user' : ''}">
                                                 <td>${user.rank}</td>
                                                 <td>${user.username}</td>
@@ -829,8 +829,8 @@ document.addEventListener('DOMContentLoaded', function() {
                                                 <td>${user.solved_challenges}</td>
                                             </tr>
                                         `).join('') :
-                                        '<tr><td colspan="4">No users found</td></tr>'
-                                    }
+                        '<tr><td colspan="4">No users found</td></tr>'
+                    }
                                 </tbody>
                             </table>
                         </div>
@@ -840,7 +840,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 // Re-add event listener to the back button
                 const backButton = document.getElementById('leaderboard-back-btn');
                 if (backButton) {
-                    backButton.addEventListener('click', function() {
+                    backButton.addEventListener('click', function () {
                         // Hide leaderboard
                         leaderboardSection.classList.add('hidden');
 
@@ -880,7 +880,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 // Add event listener to the back button
                 const backButton = document.getElementById('leaderboard-error-back-btn');
                 if (backButton) {
-                    backButton.addEventListener('click', function() {
+                    backButton.addEventListener('click', function () {
                         // Hide leaderboard
                         leaderboardSection.classList.add('hidden');
 
@@ -1062,7 +1062,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
                         // Add event listener to the button
                         const startBtn = challengeCard.querySelector('.start-challenge-btn');
-                        startBtn.addEventListener('click', function() {
+                        startBtn.addEventListener('click', function () {
                             startChallenge(challenge.id);
                         });
                     });
@@ -1185,7 +1185,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // Add close button functionality
         const closeBtn = errorMessage.querySelector('.close-error');
-        closeBtn.addEventListener('click', function() {
+        closeBtn.addEventListener('click', function () {
             errorMessage.remove();
         });
 
@@ -1319,7 +1319,7 @@ document.addEventListener('DOMContentLoaded', function() {
             // Close button functionality
             const closeBtn = document.querySelector('.modal-close');
             if (closeBtn) {
-                closeBtn.addEventListener('click', function() {
+                closeBtn.addEventListener('click', function () {
                     modal.style.display = 'none';
                     // Stop any running timers
                     if (window.statusCheckInterval) clearInterval(window.statusCheckInterval);
@@ -1328,7 +1328,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
 
             // Close when clicking outside the modal
-            window.addEventListener('click', function(event) {
+            window.addEventListener('click', function (event) {
                 if (event.target === modal) {
                     modal.style.display = 'none';
                     // Stop any running timers
@@ -1350,7 +1350,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
 
             if (submitBtn && flagInput) {
-                submitBtn.addEventListener('click', async function() {
+                submitBtn.addEventListener('click', async function () {
                     const submittedFlag = flagInput.value.trim();
 
                     // Disable the submit button to prevent multiple submissions
@@ -1467,7 +1467,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
 
             if (stopBtn) {
-                stopBtn.addEventListener('click', function() {
+                stopBtn.addEventListener('click', function () {
                     const containerId = this.getAttribute('data-container');
                     stopChallenge(containerId);
                 });
@@ -1476,7 +1476,7 @@ document.addEventListener('DOMContentLoaded', function() {
             // Add event listener for the restart button
             const restartBtn = document.getElementById('restart-challenge');
             if (restartBtn) {
-                restartBtn.addEventListener('click', function() {
+                restartBtn.addEventListener('click', function () {
                     const challengeId = this.getAttribute('data-challenge');
                     if (challengeId) {
                         // Hide the expired message
@@ -1494,7 +1494,7 @@ document.addEventListener('DOMContentLoaded', function() {
             // Add event listener for the close button in expired message
             const closeExpiredBtn = document.getElementById('close-expired-challenge');
             if (closeExpiredBtn) {
-                closeExpiredBtn.addEventListener('click', function() {
+                closeExpiredBtn.addEventListener('click', function () {
                     modal.style.display = 'none';
                     // Stop any running timers
                     if (window.statusCheckInterval) clearInterval(window.statusCheckInterval);
@@ -1520,7 +1520,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const updateUI = (remainingSeconds) => {
             // Update countdown text
             const minutes = Math.floor(remainingSeconds / 60);
-            const seconds = remainingSeconds % 60;
+            const seconds = Math.floor(remainingSeconds % 60);
             countdownEl.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
 
             // Update progress bar
