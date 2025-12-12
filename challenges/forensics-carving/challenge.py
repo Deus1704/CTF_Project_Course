@@ -167,7 +167,7 @@ def check():
     # Get container ID and challenge ID from environment variables
     container_id = os.environ.get('CONTAINER_ID', '')
     challenge_id = os.environ.get('CHALLENGE_ID', '')
-    main_site = os.environ.get('MAIN_SITE', 'http://localhost:5002')
+    main_site = os.environ.get('MAIN_SITE', 'http://localhost:5010')
 
     if answer == FLAG:
         # Construct the redirect URL to the main site

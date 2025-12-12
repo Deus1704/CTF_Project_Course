@@ -36,7 +36,7 @@ python init_db.py
 python app.py
 ```
 
-5. Access the platform at http://localhost:5002
+5. Access the platform at http://localhost:5010
 
 ## Default Credentials
 
@@ -45,7 +45,7 @@ python app.py
 
 ## Creating Your First Challenge
 
-1. Navigate to the Admin Panel at http://localhost:5002/admin
+1. Navigate to the Admin Panel at http://localhost:5010/admin
 2. Log in with the admin credentials
 3. Click "Add Challenge"
 4. Fill in the challenge details:

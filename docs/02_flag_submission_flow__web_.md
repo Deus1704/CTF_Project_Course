@@ -116,7 +116,7 @@ import os
 
 app = Flask(__name__)
 FLAG = os.environ.get('CTF_FLAG', 'actual_secret_flag') # The correct flag
-MAIN_SITE = os.environ.get('MAIN_SITE', 'http://localhost:5002') # Main CTF platform URL
+MAIN_SITE = os.environ.get('MAIN_SITE', 'http://localhost:5010') # Main CTF platform URL
 
 # This function handles requests to '/submit-flag'
 @app.route('/submit-flag', methods=['POST'])

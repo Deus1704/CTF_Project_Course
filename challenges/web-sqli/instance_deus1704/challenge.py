@@ -8,7 +8,7 @@ app = Flask(__name__)
 # Get the flag from environment variable
 FLAG = os.environ.get('CTF_FLAG', 'default_flag_please_set_env_variable')
 # Get main site URL (default to localhost if not provided)
-MAIN_SITE = os.environ.get('MAIN_SITE', 'http://localhost:5002')
+MAIN_SITE = os.environ.get('MAIN_SITE', 'http://localhost:5010')
 # Get challenge ID and container ID
 CHALLENGE_ID = os.environ.get('CHALLENGE_ID', 'web-sqli')
 CONTAINER_ID = os.environ.get('CONTAINER_ID', '')
@@ -584,7 +584,7 @@ def submit_flag():
                 # Get container ID and challenge ID from environment variables
                 container_id = os.environ.get('CONTAINER_ID', '')
                 challenge_id = os.environ.get('CHALLENGE_ID', 'web-sqli')
-                main_site = os.environ.get('MAIN_SITE', 'http://localhost:5002')
+                main_site = os.environ.get('MAIN_SITE', 'http://localhost:5010')
 
                 # For AJAX requests, return JSON
                 if request.is_json:

@@ -1,6 +1,7 @@
 print("Starting application...")
 from flask import Flask, request, jsonify, render_template, redirect, url_for, flash, session
 import hashlib
+import re
 import os
 import subprocess
 import threading
@@ -47,6 +48,23 @@ def get_host_ip():
 HOST_IP = get_host_ip()
 print(f"Host IP address: {HOST_IP}")
 
+# Check for Docker availability
+def check_docker_availability():
+    try:
+        # Check if docker is installed
+        subprocess.run(["docker", "--version"], capture_output=True, check=True)
+        
+        # Check if we have permissions to talk to the daemon
+        subprocess.run(["docker", "ps"], capture_output=True, check=True)
+        return True
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return False
+
+DOCKER_AVAILABLE = check_docker_availability()
+if not DOCKER_AVAILABLE:
+    print("WARNING: Docker is not installed, not available in the PATH, or the current user does not have permissions to access it.")
+    print("Challenge containers cannot be started without Docker.")
+
 # Docker template for challenges
 DOCKER_TEMPLATE = """
 FROM python:3.9-slim
@@ -70,7 +88,17 @@ class ChallengeLoader:
         self.challenge_id = challenge_id
         self.path = os.path.join(CHALLENGE_BASE, challenge_id)
 
+    def get_image_tag(self, user_id):
+        # Sanitize user_id to be valid in a docker tag (lowercase, alphanumeric, underscores, dashes, periods)
+        # We replace @ and other special chars with _
+        sanitized_user_id = re.sub(r'[^a-z0-9_.-]', '_', user_id.lower())
+        return f"ctf_{self.challenge_id}_{sanitized_user_id}"
+
     def build_container(self, flag, user_id):
+        if not DOCKER_AVAILABLE:
+            print("Skipping container build because Docker is not available")
+            return
+
         # Create a user-specific directory for this challenge
         user_challenge_dir = os.path.join(self.path, f"instance_{user_id}")
         os.makedirs(user_challenge_dir, exist_ok=True)
@@ -112,7 +140,8 @@ class ChallengeLoader:
                 print(f"Failed to create Dockerfile at {dockerfile_path}")
 
         # Build Docker image with a user-specific tag
-        image_tag = f"ctf_{self.challenge_id}_{user_id}".lower()
+        # Build Docker image with a user-specific tag
+        image_tag = self.get_image_tag(user_id)
         print(f"Building Docker image {image_tag}")
         result = subprocess.run([
             "docker", "build", "-t",
@@ -177,6 +206,9 @@ class ChallengeLoader:
         raise RuntimeError(f"Could not find an available port after {max_attempts} attempts")
 
     def run_container(self, user_id, flag):
+        if not DOCKER_AVAILABLE:
+            raise RuntimeError("Docker is not available. Cannot run container.")
+
         print(f"[DEBUG] Running container for user {user_id}, challenge {self.challenge_id}")
         # Check if this specific user already has a container for this challenge
         for container_id, info in active_containers.items():
@@ -207,7 +239,8 @@ class ChallengeLoader:
 
         try:
             # Check if the image exists
-            image_tag = f"ctf_{self.challenge_id}_{user_id}"
+            # Check if the image exists
+            image_tag = self.get_image_tag(user_id)
             image_check = subprocess.run(["docker", "images", image_tag, "--format", "{{.ID}}"],
                                         capture_output=True, text=True)
             print(f"[DEBUG] Image check result: {image_check.stdout}")
@@ -220,7 +253,7 @@ class ChallengeLoader:
             print(f"[DEBUG] Running Docker container with command: docker run -d -p {port}:5000 -e CTF_FLAG={flag} {image_tag}")
 
             # Get the host URL using the actual host IP instead of localhost
-            host_port = request.host.split(':')[-1] if ':' in request.host else "5002"
+            host_port = request.host.split(':')[-1] if ':' in request.host else "5010"
             host_url = f"http://{HOST_IP}:{host_port}/"
 
             # Get user token if available
@@ -294,7 +327,7 @@ class ChallengeLoader:
                 # Try running the container again with basic options
                 container_id = subprocess.check_output([
                     "docker", "run", "-d", "-p",
-                    f"{port}:5000", "-e", f"CTF_FLAG={flag}", f"ctf_{self.challenge_id}_{user_id}"
+                    f"{port}:5000", "-e", f"CTF_FLAG={flag}", self.get_image_tag(user_id)
                 ]).decode().strip()
 
                 print(f"Container started with ID (retry): {container_id}")
@@ -304,7 +337,7 @@ class ChallengeLoader:
                     "challenge": self.challenge_id,
                     "user": user_id,
                     "start_time": datetime.now(),
-                    "image_tag": f"ctf_{self.challenge_id}_{user_id}"
+                    "image_tag": self.get_image_tag(user_id)
                 }
                 return port, container_id
             except Exception as retry_error:
@@ -405,6 +438,12 @@ def verify_token(token_value):
 
 @app.route("/challenge/<challenge_id>/start", methods=["POST"])
 def start_challenge(challenge_id):
+    if not DOCKER_AVAILABLE:
+        return jsonify({
+            "error": "Docker is not available on the server. Please contact the administrator.",
+            "status": "error"
+        }), 503
+
     print(f"Starting challenge {challenge_id}")
     token_value = request.headers.get("Authorization")
     user = verify_token(token_value)
@@ -437,7 +476,7 @@ def start_challenge(challenge_id):
                         ).first()
 
                         # Get the main site URL for redirection using the actual host IP
-                        host_port = request.host.split(':')[-1] if ':' in request.host else "5002"
+                        host_port = request.host.split(':')[-1] if ':' in request.host else "5010"
                         main_site = f"http://{HOST_IP}:{host_port}/"
 
                         # Include solved status in response
@@ -453,7 +492,7 @@ def start_challenge(challenge_id):
                         })
                     else:
                         # Get the main site URL for redirection using the actual host IP
-                        host_port = request.host.split(':')[-1] if ':' in request.host else "5002"
+                        host_port = request.host.split(':')[-1] if ':' in request.host else "5010"
                         main_site = f"http://{HOST_IP}:{host_port}/"
 
                         return jsonify({
@@ -482,7 +521,7 @@ def start_challenge(challenge_id):
     print(f"Container started on port {port} with ID {container_id}")
 
     # Get the main site URL for redirection using the actual host IP
-    host_port = request.host.split(':')[-1] if ':' in request.host else "5002"
+    host_port = request.host.split(':')[-1] if ':' in request.host else "5010"
     main_site = f"http://{HOST_IP}:{host_port}/"
 
     return jsonify({
@@ -1037,7 +1076,7 @@ app = Flask(__name__)
 # Get flag from environment variable
 FLAG = os.environ.get('FLAG', 'flag{{placeholder}}')
 # Get main site URL (default to localhost if not provided)
-MAIN_SITE = os.environ.get('MAIN_SITE', 'http://localhost:5002')
+MAIN_SITE = os.environ.get('MAIN_SITE', 'http://localhost:5010')
 # Get challenge ID and container ID
 CHALLENGE_ID = os.environ.get('CHALLENGE_ID', '')
 CONTAINER_ID = os.environ.get('CONTAINER_ID', '')
@@ -1218,7 +1257,7 @@ def submit_flag():
                 # Get container ID and challenge ID from environment variables
                 container_id = os.environ.get('CONTAINER_ID', '')
                 challenge_id = os.environ.get('CHALLENGE_ID', '')
-                main_site = os.environ.get('MAIN_SITE', 'http://localhost:5002')
+                main_site = os.environ.get('MAIN_SITE', 'http://localhost:5010')
 
                 # Try to stop the container
                 try:
@@ -1358,7 +1397,7 @@ def test():
 @app.route("/host-info")
 def host_info():
     """Return host information for network access"""
-    host_port = request.host.split(':')[-1] if ':' in request.host else "5002"
+    host_port = request.host.split(':')[-1] if ':' in request.host else "5010"
     return jsonify({
         "host_ip": HOST_IP,
         "host_port": host_port,
@@ -1524,7 +1563,10 @@ def get_challenges():
     return jsonify(challenge_list)
 
 def cleanup_expired_containers():
-    """Clean up containers that have exceeded their timeout"""
+    if not DOCKER_AVAILABLE:
+        return
+
+    """Check for expired containers and stop them"""
     now = datetime.now()
     expired_containers = []
 
@@ -1578,7 +1620,10 @@ def cleanup_expired_containers():
             print(f"Error cleaning up expired container {container_id}: {e}")
 
 def cleanup_stale_containers():
-    """Clean up any stale containers from previous runs"""
+    if not DOCKER_AVAILABLE:
+        return
+
+    """Clean up any containers that might have been left running from previous sessions"""
     try:
         # Get all containers with our CTF prefix
         result = subprocess.run(
@@ -1603,7 +1648,10 @@ def cleanup_stale_containers():
         print(f"Error during container cleanup: {e}")
 
 def cleanup_unused_images():
-    """Clean up unused Docker images to free up space"""
+    if not DOCKER_AVAILABLE:
+        return
+
+    """Remove Docker images that are not associated with running containers"""
     try:
         # Get a list of all images
         result = subprocess.run(["docker", "images", "--format", "{{.Repository}}:{{.Tag}} {{.ID}}"],
@@ -1761,7 +1809,7 @@ if __name__ == "__main__":
     # Parse command line arguments
     import argparse
     parser = argparse.ArgumentParser(description='CTF Platform')
-    parser.add_argument('--port', type=int, default=5002, help='Port to run the server on')
+    parser.add_argument('--port', type=int, default=5010, help='Port to run the server on')
     args = parser.parse_args()
 
     # Clean up any stale containers from previous runs
